@@ -145,24 +145,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
-name = "byrdocs-check-v2"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "md5",
- "regex",
- "reqwest",
- "rusoto",
- "rusoto_core",
- "rusoto_s3",
- "serde",
- "serde_json",
- "serde_yaml",
- "structopt",
- "tokio",
-]
-
-[[package]]
 name = "bytes"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -182,6 +164,43 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "check-cmt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "md5",
+ "regex",
+ "reqwest",
+ "rusoto",
+ "rusoto_core",
+ "rusoto_s3",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "structopt",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "check-pr"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "md5",
+ "regex",
+ "reqwest",
+ "rusoto",
+ "rusoto_core",
+ "rusoto_s3",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "structopt",
+ "tokio",
+]
 
 [[package]]
 name = "chrono"
