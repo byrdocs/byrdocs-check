@@ -1,0 +1,15 @@
+[package]
+name = "byrdocs-check-v2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.89"
+regex = "1.11.0"
+rusoto = "0.24.2"
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
+serde = { version = "1.0.210", features = ["derive"] }
+serde_yaml = "0.9.34"
+structopt = "0.3.26"
+tokio = { version = "1.40.0", features = ["full"] }
