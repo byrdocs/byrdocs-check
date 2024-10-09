@@ -3,7 +3,7 @@
 script
 *test*
 test
-tmp
-tmp1
+tmp*
 .DS_Store
 lib/libpdfium.dylib
+.idea

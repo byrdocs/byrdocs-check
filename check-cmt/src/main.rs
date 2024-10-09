@@ -142,14 +142,14 @@ struct Input {
     secret_access_key: String,
     #[structopt(short = "c", long = "bucket", help = "bucket name", required = true)]
     bucket: String,
-    // #[structopt(long = "r2_url", help = "R2 url", required = true)]
-    // r2_url: String,
-    // #[structopt(long = "r2_acc", help = "R2 ACCESS_KEY_ID", required = true)]
-    // r2_access_key_id: String,
-    // #[structopt(long = "r2_secret", help = "R2 SECRET", required = true)]
-    // r2_secret_access_key: String,
-    // #[structopt(long = "r2_bucket", help = "R2 bucket", required = true)]
-    // r2_bucket: String,
+    #[structopt(long = "r2_url", help = "R2 url", required = true)]
+    r2_url: String,
+    #[structopt(long = "r2_acc", help = "R2 ACCESS_KEY_ID", required = true)]
+    r2_access_key_id: String,
+    #[structopt(long = "r2_secret", help = "R2 SECRET", required = true)]
+    r2_secret_access_key: String,
+    #[structopt(long = "r2_bucket", help = "R2 bucket", required = true)]
+    r2_bucket: String,
 }
 
 async fn get_s3_client(s3_url: String, access_key: String, secret_key: String) -> anyhow::Result<S3Client> {
@@ -157,7 +157,7 @@ async fn get_s3_client(s3_url: String, access_key: String, secret_key: String) -
     let http_client = HttpClient::new()?;
     let credentials = rusoto_core::credential::StaticProvider::new_minimal(access_key, secret_key);
     let region = rusoto_core::Region::Custom {
-        name: "byr".to_owned(),
+        name: "apac".to_owned(),
         endpoint: end_point,
     };
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
@@ -222,13 +222,13 @@ async fn download_files(s3_client: &S3Client, s3_obj: &Vec<Object>, files_need_u
 
 async fn generate_jpg_files(publish_list: &mut HashSet<String>) -> anyhow::Result<()> {
     let dir = Path::new("./tmp1");
+    let pdfium = Pdfium::new(
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
+            .or_else(|_| Pdfium::bind_to_system_library())?,
+    );
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
-        let pdfium = Pdfium::new(
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
-                .or_else(|_| Pdfium::bind_to_system_library())?,
-        );
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
             println!("Processing pdf: {:?}", path.to_string_lossy().as_ref());
             if let Ok(document) = pdfium.load_pdf_from_file(path.to_str().unwrap(), None) {
@@ -350,7 +350,7 @@ async fn publish_files(backend_url: String, backend_token: String, publish_list:
     Ok(())
 }
 
-async fn merge_json(dir: String) -> anyhow::Result<()> {
+async fn merge_json(dir: &String) -> anyhow::Result<()> {
     let dir = Path::new(dir.as_str());
     let mut json = Vec::new();
     for metadata in dir.read_dir()? {
@@ -365,7 +365,7 @@ async fn merge_json(dir: String) -> anyhow::Result<()> {
             json.push(metadata);
         }            
     }
-    let temp_file_path = dir.join("metadata.json");
+    let temp_file_path = dir.join("metadata2.json");
     let mut temp_file = File::create(&temp_file_path).await?;
     let json_data = serde_json::to_string_pretty(&json)?;
     temp_file.write_all(json_data.as_bytes()).await?;
@@ -378,28 +378,42 @@ async fn merge_json(dir: String) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     let input = Input::from_args();
 
-    let s3_client = get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
-    let s3_obj = s3_client.list_objects_v2(rusoto_s3::ListObjectsV2Request {
-            bucket: input.bucket.clone(),
-            ..Default::default()
-        }).await?.contents.unwrap();
-    let files_need_update = get_files_need_update(&s3_obj).await?;
+    // let s3_client = get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
+    // let s3_obj = s3_client.list_objects_v2(rusoto_s3::ListObjectsV2Request {
+    //         bucket: input.bucket.clone(),
+    //         ..Default::default()
+    //     }).await?.contents.unwrap();
+    // let files_need_update = get_files_need_update(&s3_obj).await?;
     
-    std::fs::create_dir_all("./tmp1")?;
-    std::fs::create_dir_all("./tmp2")?;
-    std::fs::create_dir_all("./tmp3")?;
-    download_files(&s3_client, &s3_obj, &files_need_update, input.bucket.clone()).await?;
+    // std::fs::create_dir_all("./tmp1")?;
+    // std::fs::create_dir_all("./tmp2")?;
+    // std::fs::create_dir_all("./tmp3")?;
+    // download_files(&s3_client, &s3_obj, &files_need_update, input.bucket.clone()).await?;
 
-    let mut publish_list = HashSet::new();
-    generate_jpg_files(&mut publish_list).await?;
+    // let mut publish_list = HashSet::new();
+    // generate_jpg_files(&mut publish_list).await?;
 
-    generate_webp_files().await?;
+    // generate_webp_files().await?;
 
-    upload_files(&s3_client, input.bucket).await?;
+    // upload_files(&s3_client, input.bucket).await?;
 
-    publish_files(input.backend_url, input.backend_token, publish_list).await?;
+    // publish_files(input.backend_url, input.backend_token, publish_list).await?;
 
-    merge_json(input.dir).await?;
+    merge_json(&input.dir).await?;
+
+    let r2_client = get_s3_client(input.r2_url, input.r2_access_key_id, input.r2_secret_access_key).await?;
+    let metadata_json = File::open(Path::new(&input.dir).join("metadata2.json")).await?;
+    let mut reader = BufReader::new(metadata_json);
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).await?;
+    let request = rusoto_s3::PutObjectRequest {
+        bucket: input.r2_bucket.clone(),
+        key: "metadata2.json".to_string(),
+        body: Some(buf.into()),
+        ..Default::default()
+    };
+    r2_client.put_object(request).await?;
+    println!("Uploading metadata to R2");
 
     Ok(())
 }
