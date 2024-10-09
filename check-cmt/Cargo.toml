@@ -7,7 +7,9 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1.0.89"
+image = "0.25.2"
 md5 = "0.7.0"
+pdfium-render = "0.8.25"
 regex = "1.11.0"
 reqwest = { version = "0.12.8", features = ["json"] }
 rusoto = "0.24.2"
@@ -19,3 +21,4 @@ serde_yaml = "0.9.34"
 structopt = "0.3.26"
 tempfile = "3.13.0"
 tokio = { version = "1.40.0", features = ["full"] }
+webp = "0.3.0"
