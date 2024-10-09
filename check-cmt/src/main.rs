@@ -378,26 +378,26 @@ async fn merge_json(dir: &String) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     let input = Input::from_args();
 
-    // let s3_client = get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
-    // let s3_obj = s3_client.list_objects_v2(rusoto_s3::ListObjectsV2Request {
-    //         bucket: input.bucket.clone(),
-    //         ..Default::default()
-    //     }).await?.contents.unwrap();
-    // let files_need_update = get_files_need_update(&s3_obj).await?;
+    let s3_client = get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
+    let s3_obj = s3_client.list_objects_v2(rusoto_s3::ListObjectsV2Request {
+            bucket: input.bucket.clone(),
+            ..Default::default()
+        }).await?.contents.unwrap();
+    let files_need_update = get_files_need_update(&s3_obj).await?;
     
-    // std::fs::create_dir_all("./tmp1")?;
-    // std::fs::create_dir_all("./tmp2")?;
-    // std::fs::create_dir_all("./tmp3")?;
-    // download_files(&s3_client, &s3_obj, &files_need_update, input.bucket.clone()).await?;
+    std::fs::create_dir_all("./tmp1")?;
+    std::fs::create_dir_all("./tmp2")?;
+    std::fs::create_dir_all("./tmp3")?;
+    download_files(&s3_client, &s3_obj, &files_need_update, input.bucket.clone()).await?;
 
-    // let mut publish_list = HashSet::new();
-    // generate_jpg_files(&mut publish_list).await?;
+    let mut publish_list = HashSet::new();
+    generate_jpg_files(&mut publish_list).await?;
 
-    // generate_webp_files().await?;
+    generate_webp_files().await?;
 
-    // upload_files(&s3_client, input.bucket).await?;
+    upload_files(&s3_client, input.bucket).await?;
 
-    // publish_files(input.backend_url, input.backend_token, publish_list).await?;
+    publish_files(input.backend_url, input.backend_token, publish_list).await?;
 
     merge_json(&input.dir).await?;
 
