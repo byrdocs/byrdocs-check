@@ -51,6 +51,7 @@ struct Test {
     filetype: String,
     stage: Option<String>,
     content: Vec<String>,
+    filesize: Option<u64>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -71,6 +72,8 @@ struct Book {
     publisher: String,
     isbn: String,
     filetype: String,
+    isbn_raw: Option<String>,
+    filesize: Option<u64>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -80,6 +83,7 @@ struct Doc {
     filetype: String,
     course: Course,
     content: Vec<DocContent>,
+    filesize: Option<u64>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -179,9 +183,11 @@ async fn main() -> anyhow::Result<()> {
 
     upload_files(&s3_client, input.bucket).await?;
 
+    //img part over
+
     publish_files(input.backend_url, input.backend_token, &input.dir).await?;
 
-    merge_json(&input.dir).await?;
+    merge_json(&input.dir, &s3_obj).await?;
 
     upload_metadata(input.r2_url, input.r2_access_key_id, input.r2_secret_access_key, input.r2_bucket, &input.dir).await?;
 
@@ -399,7 +405,7 @@ async fn publish_files(backend_url: String, backend_token: String, dir: &String)
     Ok(())
 }
 
-async fn merge_json(dir: &String) -> anyhow::Result<()> {
+async fn merge_json(dir: &String, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
     let dir = Path::new(dir.as_str());
     let mut json = Vec::new();
     for metadata in dir.read_dir()? {
@@ -410,7 +416,34 @@ async fn merge_json(dir: &String) -> anyhow::Result<()> {
             let mut reader = BufReader::new(file);
             let mut buf = Vec::new();
             reader.read_to_end(&mut buf).await?;
-            let metadata: MetaData = serde_yaml::from_slice(&buf)?;
+            let mut metadata: MetaData = serde_yaml::from_slice(&buf)?;
+
+            if let Data::Book(ref mut book) = metadata.data {
+                let key = format!("{}.pdf", metadata.id);
+                let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
+                if let Some(file) = file {
+                    book.filesize = Some(file.size.unwrap() as u64);
+                }
+                book.isbn_raw = Some(book.isbn.replace("-", ""));
+            }
+
+            if let Data::Doc(ref mut doc) = metadata.data {
+                let key = format!("{}.pdf", metadata.id);
+                let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
+                if let Some(file) = file {
+                    doc.content.push(DocContent::课件);
+                    doc.filesize = Some(file.size.unwrap() as u64);
+                }
+            }
+
+            if let Data::Test(ref mut test) = metadata.data {
+                let key = format!("{}.pdf", metadata.id);
+                let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
+                if let Some(file) = file {
+                    test.filesize = Some(file.size.unwrap() as u64);
+                }
+            }
+
             json.push(metadata);
         }            
     }
