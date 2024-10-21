@@ -219,8 +219,7 @@ async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<S
             webp_files.insert(key[..32].to_string());
         }
     }
-    println!("Jpg files: {:?}", jpg_files);
-    println!("Webp files: {:?}", webp_files);
+
     let mut raw_files = HashSet::new();
     for item in s3_obj {
         let key = item.key.clone().unwrap_or_default();
@@ -228,12 +227,12 @@ async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<S
             raw_files.insert(key[..32].to_string());
         }
     }
-    println!("Raw files: {:?}", raw_files);
+
     let jpg_diff = raw_files.difference(&jpg_files).cloned().collect::<HashSet<_>>();
     let webp_diff = raw_files.difference(&webp_files).cloned().collect::<HashSet<_>>();
     let files_need_update = jpg_diff.union(&webp_diff).cloned().collect::<HashSet<_>>();
     //Get files need to update
-    println!("Files need to update: {:?}", files_need_update);
+    println!("Files need to update: {:#?}", files_need_update);
     Ok(files_need_update)
 }
 
@@ -268,6 +267,7 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
             .or_else(|_| Pdfium::bind_to_system_library())?,
     );
+    let mut error_count = 0;
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
@@ -288,15 +288,22 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
                 )?;
             }else{
                 println!("Failed to load pdf: {:?}", path.to_string_lossy().as_ref());
+                error_count += 1;
             };
         }
     }//Generate jpg files
+
+    if error_count > 0 {
+        return Err(anyhow::anyhow!("Failed to load {} pdf files", error_count));
+    }
+
     println!("jpg Files generated");
     Ok(())
 }
 
 async fn generate_webp_files() -> anyhow::Result<()> {
     let dir = Path::new("./tmp2");
+    let mut count = 0;
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
@@ -316,11 +323,11 @@ async fn generate_webp_files() -> anyhow::Result<()> {
     
             let file_path = Path::new("./tmp3").join(format!("{}.webp", path.file_stem().unwrap().to_str().unwrap()));
             let mut file = File::create(file_path.clone()).await?;
-            println!("file: {:#?}", file_path.to_string_lossy());
             file.write_all(&webp_data).await?;
+            count += 1;
         }
     }//Generate jpg files
-    println!("webp Files generated");
+    println!("webp Files generated: {}", count);
     Ok(())
 }
 

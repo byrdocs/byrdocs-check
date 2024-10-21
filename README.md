@@ -5,7 +5,13 @@
 
 ## Usage
 
+First, compile the binaries of PDFium and place them in the `./lib` directory with the appropriate filename, such as `libpdfium.xxx`.
+
+Then
 ```sh
-cargo install --path .
-byrdocs-check -d "./path_you_want_to_check"
+cargo run --bin check-pr -d "./path_you_want_to_check" ...
+```
+Or
+```sh
+cargo run --bin check-cmt -d "./path_you_want_to_check" ...
 ```
