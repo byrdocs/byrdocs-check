@@ -1,3 +1,5 @@
+mod metadata;
+
 use std::{collections::HashSet,path::Path};
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
@@ -12,88 +14,7 @@ use pdfium_render::prelude::*;
 use webp;
 use webp::Encoder;
 
-
-#[derive(serde::Deserialize, serde::Serialize)]
-enum Type {
-    #[serde(rename = "test")]
-    Test,
-    #[serde(rename = "book")]
-    Book,
-    #[serde(rename = "doc")]
-    Doc,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(untagged)]
-enum Data {
-    Test(Test),
-    Book(Book),
-    Doc(Doc),
-    
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[allow(dead_code)]
-struct MetaData {
-    id: String,
-    url: String,
-    #[serde(rename = "type")]
-    type_: Type,
-    data: Data
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[allow(dead_code)]
-struct Test {
-    title: String,
-    college: Option<String>,
-    course: Course,
-    filetype: String,
-    stage: Option<String>,
-    content: Vec<String>,
-    filesize: Option<u64>,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[allow(dead_code)]
-struct Course {
-    #[serde(rename = "type")]
-    type_: Option<String>,
-    name: Option<String>,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[allow(dead_code)]
-struct Book {
-    title: String,
-    authors: Vec<String>,
-    translators: Vec<String>,
-    edition: Option<String>,
-    publisher: String,
-    isbn: String,
-    filetype: String,
-    isbn_raw: Option<String>,
-    filesize: Option<u64>,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[allow(dead_code)]
-struct Doc {
-    title: String,
-    filetype: String,
-    course: Course,
-    content: Vec<DocContent>,
-    filesize: Option<u64>,
-}
-
-#[derive(serde::Deserialize, serde::Serialize)]
-enum DocContent {
-    思维导图,
-    题库,
-    答案,
-    知识点,
-    课件,
-}
+use metadata::*;
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
@@ -183,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
 
     upload_files(&s3_client, input.bucket).await?;
 
-    //img part over
+    //image part over
 
     publish_files(input.backend_url, input.backend_token, &input.dir).await?;
 
@@ -327,7 +248,7 @@ async fn generate_webp_files() -> anyhow::Result<()> {
             count += 1;
         }
     }//Generate jpg files
-    println!("webp Files generated: {}", count);
+    println!("{} webp Files generated", count);
     Ok(())
 }
 
@@ -373,7 +294,7 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
     Ok(())
 }
 
-async fn publish_files(backend_url: String, backend_token: String, dir: &String) -> anyhow::Result<()> {
+async fn publish_files(backend_url: String, backend_token: String, dir: &str) -> anyhow::Result<()> {
     
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
@@ -431,14 +352,12 @@ async fn merge_json(dir: &String, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
                 if let Some(file) = file {
                     book.filesize = Some(file.size.unwrap() as u64);
                 }
-                book.isbn_raw = Some(book.isbn.replace("-", ""));
             }
 
             if let Data::Doc(ref mut doc) = metadata.data {
                 let key = format!("{}.pdf", metadata.id);
                 let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
                 if let Some(file) = file {
-                    doc.content.push(DocContent::课件);
                     doc.filesize = Some(file.size.unwrap() as u64);
                 }
             }

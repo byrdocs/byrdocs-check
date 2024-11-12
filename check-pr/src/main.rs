@@ -1,3 +1,5 @@
+mod metadata;
+
 use anyhow;
 use regex;
 use rusoto_core::HttpClient;
@@ -10,6 +12,8 @@ use tokio::{
     self,
     io::{AsyncReadExt, BufReader},
 };
+
+use crate::metadata::*;
 
 #[derive(StructOpt)]
 struct Input {
@@ -40,84 +44,6 @@ struct Input {
 }
 
 #[derive(serde::Deserialize, Debug)]
-enum Type {
-    #[serde(rename = "test")]
-    Test,
-    #[serde(rename = "book")]
-    Book,
-    #[serde(rename = "doc")]
-    Doc,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(untagged)]
-enum Data {
-    Test(Test),
-    Book(Book),
-    Doc(Doc),
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
-struct MetaData {
-    id: String,
-    url: String,
-    #[serde(rename = "type")]
-    type_: Type,
-    data: Data,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
-struct Test {
-    title: String,
-    college: Option<String>,
-    course: Course,
-    filetype: String,
-    stage: Option<String>,
-    content: Vec<String>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
-struct Course {
-    #[serde(rename = "type")]
-    type_: Option<String>,
-    name: Option<String>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
-struct Book {
-    title: String,
-    authors: Vec<String>,
-    translators: Vec<String>,
-    edition: Option<String>,
-    publisher: String,
-    isbn: String,
-    filetype: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
-struct Doc {
-    title: String,
-    filetype: String,
-    course: Course,
-    content: Vec<DocContent>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-enum DocContent {
-    思维导图,
-    题库,
-    答案,
-    知识点,
-    课件,
-}
-
-#[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
 struct ApiResult {
     success: bool,
@@ -133,10 +59,10 @@ struct TempFiles {
     #[serde(rename = "fileName")]
     file_name: String,
     #[serde(rename = "fileSize")]
-    file_size: u64,
+    file_size: Option<u64>,
     uploader: String,
     #[serde(rename = "uploadTime")]
-    upload_time: String,
+    upload_time: Option<String>,
     status: Status,
     #[serde(rename = "errorMessage")]
     error_message: Option<String>,
@@ -202,8 +128,18 @@ async fn main() -> anyhow::Result<()> {
         }
         let path = entry.path();
         if path.is_file() {
+            println!("{}", path.display());
             let file = std::fs::File::open(&path)?;
             let metadata: MetaData = serde_yaml::from_reader(file)?;
+
+            match check_enum(&metadata.data) {
+               Err(e) => {
+                    println!("{}, {:?}",path.display(), e);
+                    continue;
+                },
+               _ => ()
+            };
+
             let url_regex =
                 regex::Regex::new(r"^https://byrdocs\.org/files/[a-fA-F0-9]{32}\.(pdf|zip)$")
                     .unwrap();
@@ -248,13 +184,13 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             match metadata.data {
-                Data::Test(_test) => {
+                Data::Test(_) => {
                     success_test += 1;
                 }
-                Data::Book(_book) => {
+                Data::Book(_) => {
                     success_book += 1;
                 }
-                Data::Doc(_doc) => {
+                Data::Doc(_) => {
                     success_doc += 1;
                 }
             }
@@ -272,4 +208,67 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Some files are invalid"));
     }
     Ok(())
+}
+
+fn check_enum(data: &Data) -> anyhow::Result<()> {
+    match data {
+        Data::Test(test) => {
+            match &test.course.type_ {
+                Some(test) => {
+                    if !["本科","研究生"].contains(&test.as_str()) {
+                        return Err(anyhow::anyhow!("Invalid course type"));
+                    }
+                },
+                None => ()
+            }
+            match &test.time.stage {
+                Some(stage) => {
+                    if !["期中","期末"].contains(&stage.as_str()) {
+                        return Err(anyhow::anyhow!("Invalid stage"));
+                    }
+                },
+                None => ()
+            }
+            match &test.time.semester {
+                Some(semester) => {
+                    if !["First","Second"].contains(&semester.as_str()) {
+                        return Err(anyhow::anyhow!("Invalid semester"));
+                    }
+                },
+                None => ()
+            }
+            for content in &test.content {
+                match content.as_str() {
+                    "原题" => (),
+                    "答案" => (),
+                    _ => return Err(anyhow::anyhow!("Invalid content"))
+                }
+            }
+        },
+        Data::Book(_) => (),
+        Data::Doc(doc) => {
+            for course in &doc.course {
+                match &course.type_ {
+                    Some(test) => {
+                        if !["本科","研究生"].contains(&test.as_str()) {
+                            return Err(anyhow::anyhow!("Invalid course type"));
+                        }
+                    },
+                    None => ()
+                }   
+            }
+            for content in &doc.content {
+                match content.as_str() {
+                    "思维导图" => (),
+                    "题库" => (),
+                    "答案" => (),
+                    "知识点" => (),
+                    "课件" => (),
+                    _ => return Err(anyhow::anyhow!("Invalid content"))
+                }
+            }
+        }
+    }
+
+    Ok(()) 
 }

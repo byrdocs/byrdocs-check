@@ -5,5 +5,5 @@ script
 test
 tmp*
 .DS_Store
-lib/libpdfium.dylib
+/lib
 .idea
