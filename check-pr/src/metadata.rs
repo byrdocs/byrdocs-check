@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(serde::Deserialize, Debug)]
 pub enum Type {
@@ -11,6 +11,7 @@ pub enum Type {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[allow(dead_code)]
 pub enum Data {
     Test(Test),
     Book(Book),
@@ -37,8 +38,6 @@ pub struct Test {
     pub content: Vec<String>,
 }
 
-
-
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct Time {
@@ -47,7 +46,6 @@ pub struct Time {
     pub semester: Option<String>,
     pub stage: Option<String>,
 }
-
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
@@ -85,15 +83,31 @@ impl<'de> Deserialize<'de> for MetaData {
     {
         let value = serde_yaml::Value::deserialize(deserializer)?;
         let data = match value.get("type").and_then(|t| t.as_str()) {
-            Some("test") => Ok(Data::Test(serde_yaml::from_value(value.get("data").unwrap().clone()).map_err(serde::de::Error::custom)?)),
-            Some("book") => Ok(Data::Book(serde_yaml::from_value(value.get("data").unwrap().clone()).map_err(serde::de::Error::custom)?)),
-            Some("doc") => Ok(Data::Doc(serde_yaml::from_value(value.get("data").unwrap().clone()).map_err(serde::de::Error::custom)?)),
+            Some("test") => Ok(Data::Test(
+                serde_yaml::from_value(value.get("data").unwrap().clone())
+                    .map_err(serde::de::Error::custom)?,
+            )),
+            Some("book") => Ok(Data::Book(
+                serde_yaml::from_value(value.get("data").unwrap().clone())
+                    .map_err(serde::de::Error::custom)?,
+            )),
+            Some("doc") => Ok(Data::Doc(
+                serde_yaml::from_value(value.get("data").unwrap().clone())
+                    .map_err(serde::de::Error::custom)?,
+            )),
             _ => Err(serde::de::Error::custom("unknown type")),
         }?;
         Ok(MetaData {
-            id: value["id"].as_str().ok_or_else(|| serde::de::Error::custom("missing id"))?.to_owned(),
-            url: value["url"].as_str().ok_or_else(|| serde::de::Error::custom("missing url"))?.to_owned(),
-            type_: serde_yaml::from_value(value["type"].clone()).map_err(serde::de::Error::custom)?,
+            id: value["id"]
+                .as_str()
+                .ok_or_else(|| serde::de::Error::custom("missing id"))?
+                .to_owned(),
+            url: value["url"]
+                .as_str()
+                .ok_or_else(|| serde::de::Error::custom("missing url"))?
+                .to_owned(),
+            type_: serde_yaml::from_value(value["type"].clone())
+                .map_err(serde::de::Error::custom)?,
             data,
         })
     }

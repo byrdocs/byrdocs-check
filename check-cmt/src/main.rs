@@ -1,16 +1,19 @@
 mod metadata;
 
-use std::{collections::HashSet,path::Path};
+use anyhow;
+use pdfium_render::prelude::*;
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
-use serde_json::json;
-use tokio::{self, io::{AsyncReadExt, AsyncWriteExt, BufReader}};
-use serde_yaml;
 use serde;
-use anyhow;
+use serde_json::json;
+use serde_yaml;
+use std::{collections::HashSet, path::Path};
 use structopt::StructOpt;
 use tokio::fs::File;
-use pdfium_render::prelude::*;
+use tokio::{
+    self,
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+};
 use webp;
 use webp::Encoder;
 
@@ -53,7 +56,12 @@ enum Status {
 
 #[derive(StructOpt)]
 struct Input {
-    #[structopt(short = "d", long = "dir", help = "The metadata path to check", required = true)]
+    #[structopt(
+        short = "d",
+        long = "dir",
+        help = "The metadata path to check",
+        required = true
+    )]
     dir: String,
     #[structopt(short = "u", long = "url", help = "S3 url", required = true)]
     s3_url: String,
@@ -61,9 +69,19 @@ struct Input {
     backend_url: String,
     #[structopt(short = "t", long = "token", help = "Token", required = true)]
     backend_token: String,
-    #[structopt(short = "a", long = "ACCESS_KEY_ID", help = "ACCESS_KEY_ID", required = true)]
+    #[structopt(
+        short = "a",
+        long = "ACCESS_KEY_ID",
+        help = "ACCESS_KEY_ID",
+        required = true
+    )]
     assess_key_id: String,
-    #[structopt(short = "s", long = "SECRET_ACCESS_KEY", help = "SECRET_ACCESS_KEY", required = true)]
+    #[structopt(
+        short = "s",
+        long = "SECRET_ACCESS_KEY",
+        help = "SECRET_ACCESS_KEY",
+        required = true
+    )]
     secret_access_key: String,
     #[structopt(short = "c", long = "bucket", help = "bucket name", required = true)]
     bucket: String,
@@ -86,13 +104,11 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    let s3_client = get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
-    let s3_obj = s3_client.list_objects_v2(rusoto_s3::ListObjectsV2Request {
-            bucket: input.bucket.clone(),
-            ..Default::default()
-        }).await?.contents.unwrap();
+    let s3_client =
+        get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
+    let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
     let files_need_update = get_files_need_update(&s3_obj).await?;
-    
+
     std::fs::create_dir_all("./tmp1")?;
     std::fs::create_dir_all("./tmp2")?;
     std::fs::create_dir_all("./tmp3")?;
@@ -110,12 +126,23 @@ async fn main() -> anyhow::Result<()> {
 
     merge_json(&input.dir, &s3_obj).await?;
 
-    upload_metadata(input.r2_url, input.r2_access_key_id, input.r2_secret_access_key, input.r2_bucket, &input.dir).await?;
+    upload_metadata(
+        input.r2_url,
+        input.r2_access_key_id,
+        input.r2_secret_access_key,
+        input.r2_bucket,
+        &input.dir,
+    )
+    .await?;
 
     Ok(())
 }
 
-async fn get_s3_client(s3_url: String, access_key: String, secret_key: String) -> anyhow::Result<S3Client> {
+async fn get_s3_client(
+    s3_url: String,
+    access_key: String,
+    secret_key: String,
+) -> anyhow::Result<S3Client> {
     let end_point = s3_url;
     let http_client = HttpClient::new()?;
     let credentials = rusoto_core::credential::StaticProvider::new_minimal(access_key, secret_key);
@@ -128,7 +155,6 @@ async fn get_s3_client(s3_url: String, access_key: String, secret_key: String) -
 }
 
 async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<String>> {
-    
     let mut jpg_files = HashSet::new();
     let mut webp_files = HashSet::new();
     for item in s3_obj {
@@ -149,15 +175,26 @@ async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<S
         }
     }
 
-    let jpg_diff = raw_files.difference(&jpg_files).cloned().collect::<HashSet<_>>();
-    let webp_diff = raw_files.difference(&webp_files).cloned().collect::<HashSet<_>>();
+    let jpg_diff = raw_files
+        .difference(&jpg_files)
+        .cloned()
+        .collect::<HashSet<_>>();
+    let webp_diff = raw_files
+        .difference(&webp_files)
+        .cloned()
+        .collect::<HashSet<_>>();
     let files_need_update = jpg_diff.union(&webp_diff).cloned().collect::<HashSet<_>>();
     //Get files need to update
     println!("Files need to update: {:#?}", files_need_update);
     Ok(files_need_update)
 }
 
-async fn download_files(s3_client: &S3Client, s3_obj: &Vec<Object>, files_need_update: HashSet<String>, bucket: String) -> anyhow::Result<()> {
+async fn download_files(
+    s3_client: &S3Client,
+    s3_obj: &Vec<Object>,
+    files_need_update: HashSet<String>,
+    bucket: String,
+) -> anyhow::Result<()> {
     std::fs::create_dir_all("./tmp1")?;
     let dir = Path::new("./tmp1");
     for file in s3_obj {
@@ -177,7 +214,7 @@ async fn download_files(s3_client: &S3Client, s3_obj: &Vec<Object>, files_need_u
             let mut file = File::create(file_path).await?;
             file.write_all(&buf).await?;
         }
-    }//Download files
+    } //Download files
     println!("Files downloaded");
     Ok(())
 }
@@ -199,20 +236,26 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
                     .set_target_width(2000)
                     .set_maximum_height(2000)
                     .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
-                let document = document.pages().get(0).unwrap()
+                let document = document
+                    .pages()
+                    .get(0)
+                    .unwrap()
                     .render_with_config(&render_config)?
                     .as_image()
                     .into_rgb8();
                 document.save_with_format(
-                        format!("./tmp2/{}.jpg", path.file_name().unwrap().to_str().unwrap()[..32].to_string()), 
-                        image::ImageFormat::Jpeg
+                    format!(
+                        "./tmp2/{}.jpg",
+                        path.file_name().unwrap().to_str().unwrap()[..32].to_string()
+                    ),
+                    image::ImageFormat::Jpeg,
                 )?;
-            }else{
+            } else {
                 println!("Failed to load pdf: {:?}", path.to_string_lossy().as_ref());
                 error_count += 1;
             };
         }
-    }//Generate jpg files
+    } //Generate jpg files
 
     if error_count > 0 {
         return Err(anyhow::anyhow!("Failed to load {} pdf files", error_count));
@@ -234,20 +277,26 @@ async fn generate_webp_files() -> anyhow::Result<()> {
             let encoder = Encoder::from_image(&dynamic_img).unwrap();
             let mut webp_data = encoder.encode(100.0);
             if webp_data.len() <= 50 * 1024 {
-                let file_path = Path::new("./tmp3").join(format!("{}.webp", path.file_stem().unwrap().to_str().unwrap()));
+                let file_path = Path::new("./tmp3").join(format!(
+                    "{}.webp",
+                    path.file_stem().unwrap().to_str().unwrap()
+                ));
                 let mut file = File::create(file_path).await?;
                 file.write_all(&webp_data).await?;
                 return Ok(());
             }
-            let quality = ((48.0*1024.0 / webp_data.len() as f32) * 100.0) as i32;
+            let quality = ((48.0 * 1024.0 / webp_data.len() as f32) * 100.0) as i32;
             webp_data = encoder.encode(std::cmp::max(quality, 5) as f32);
-    
-            let file_path = Path::new("./tmp3").join(format!("{}.webp", path.file_stem().unwrap().to_str().unwrap()));
+
+            let file_path = Path::new("./tmp3").join(format!(
+                "{}.webp",
+                path.file_stem().unwrap().to_str().unwrap()
+            ));
             let mut file = File::create(file_path.clone()).await?;
             file.write_all(&webp_data).await?;
             count += 1;
         }
-    }//Generate jpg files
+    } //Generate jpg files
     println!("{} webp Files generated", count);
     Ok(())
 }
@@ -264,7 +313,12 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
             reader.read_to_end(&mut buf).await?;
             let request = rusoto_s3::PutObjectRequest {
                 bucket: bucket.clone(),
-                key: path.file_name().unwrap().to_string_lossy().as_ref().to_string(),
+                key: path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+                    .to_string(),
                 body: Some(buf.into()),
                 ..Default::default()
             };
@@ -282,7 +336,12 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
             reader.read_to_end(&mut buf).await?;
             let request = rusoto_s3::PutObjectRequest {
                 bucket: bucket.clone(),
-                key: path.file_name().unwrap().to_string_lossy().as_ref().to_string(),
+                key: path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+                    .to_string(),
                 body: Some(buf.into()),
                 ..Default::default()
             };
@@ -294,40 +353,58 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
     Ok(())
 }
 
-async fn publish_files(backend_url: String, backend_token: String, dir: &str) -> anyhow::Result<()> {
-    
+async fn publish_files(
+    backend_url: String,
+    backend_token: String,
+    dir: &str,
+) -> anyhow::Result<()> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
-    for file in path.read_dir()?{
+    for file in path.read_dir()? {
         let file = file?;
         let path = file.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
-            let file_name = path.file_name().unwrap().to_string_lossy().as_ref().to_string();
+            let file_name = path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+                .to_string();
             local_files.insert(file_name[..32].to_string());
         }
-    };
+    }
 
     let backend_client = reqwest::Client::new();
-    let temp_files = backend_client.get(format!("{}/api/file/notPublished", backend_url))
+    let temp_files = backend_client
+        .get(format!("{}/api/file/notPublished", backend_url))
         .bearer_auth(backend_token.clone())
         .send()
         .await?
         .json::<ApiResult>()
         .await?;
-    let temp_filename = temp_files.files.iter().map(|file| file.file_name[..32].to_string()).collect::<HashSet<_>>();
-    let publish_list = local_files.intersection(&temp_filename).cloned().collect::<HashSet<_>>();
+    let temp_filename = temp_files
+        .files
+        .iter()
+        .map(|file| file.file_name[..32].to_string())
+        .collect::<HashSet<_>>();
+    let publish_list = local_files
+        .intersection(&temp_filename)
+        .cloned()
+        .collect::<HashSet<_>>();
     let mut ids = Vec::new();
     for file in temp_files.files {
         if publish_list.contains(&file.file_name[..32].to_string()) {
             ids.push(file.id);
         }
     }
-    backend_client.post(format!("{}/api/file/publish", backend_url))
+    backend_client
+        .post(format!("{}/api/file/publish", backend_url))
         .bearer_auth(backend_token)
         .json(&json!({
             "ids": ids
         }))
-        .send().await?;
+        .send()
+        .await?;
     //Publish files
     println!("Files published");
     Ok(())
@@ -371,7 +448,7 @@ async fn merge_json(dir: &String, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
             }
 
             json.push(metadata);
-        }            
+        }
     }
     let temp_file_path = dir.join("metadata2.json");
     let mut temp_file = File::create(&temp_file_path).await?;
@@ -382,7 +459,13 @@ async fn merge_json(dir: &String, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn upload_metadata(r2_url: String, r2_access_key_id: String, r2_secret_access_key: String, r2_bucket: String, dir: &String) -> anyhow::Result<()> {
+async fn upload_metadata(
+    r2_url: String,
+    r2_access_key_id: String,
+    r2_secret_access_key: String,
+    r2_bucket: String,
+    dir: &String,
+) -> anyhow::Result<()> {
     let r2_client = get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key).await?;
     let metadata_json = File::open(Path::new(&dir).join("metadata2.json")).await?;
     let mut reader = BufReader::new(metadata_json);
@@ -397,4 +480,40 @@ async fn upload_metadata(r2_url: String, r2_access_key_id: String, r2_secret_acc
     r2_client.put_object(request).await?;
     println!("Uploading metadata to R2");
     Ok(())
+}
+
+async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Vec<Object> {
+    let mut continuation_token: Option<String> = None;
+    let mut s3_file_list = Vec::new();
+
+    loop {
+        let request = rusoto_s3::ListObjectsV2Request {
+            bucket: bucket_name.to_string(),
+            continuation_token: continuation_token.clone(),
+            ..Default::default()
+        };
+
+        match client.list_objects_v2(request).await {
+            Ok(output) => {
+                if let Some(contents) = output.contents {
+                    s3_file_list.extend(contents);
+                }
+
+                if let Some(next_continuation_token) = output.next_continuation_token {
+                    continuation_token = Some(next_continuation_token);
+                } else {
+                    break;
+                }
+            }
+            Err(rusoto_core::RusotoError::Unknown(resp)) => {
+                eprintln!("Error: {}", resp.status);
+                break;
+            }
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                break;
+            }
+        }
+    }
+    s3_file_list
 }

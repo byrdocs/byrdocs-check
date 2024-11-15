@@ -93,17 +93,9 @@ async fn main() -> anyhow::Result<()> {
         endpoint: end_point,
     };
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
-    let request = rusoto_s3::ListObjectsV2Request {
-        bucket: input.bucket.clone(),
-        ..Default::default()
-    };
-    let result = s3_client.list_objects_v2(request).await?;
-    let s3_file_list = result
-        .contents
-        .unwrap()
-        .iter()
-        .map(|item| item.key.clone().unwrap())
-        .collect::<Vec<_>>();
+    let s3_file_list = list_all_objects(&s3_client, &input.bucket).await;
+
+    println!("S3 file list: {:#?}", s3_file_list);
 
     let backend_client = reqwest::Client::new();
     let temp_files = backend_client
@@ -119,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
     let mut success_doc = 0;
     let mut total = 0;
     let dir_path = Path::new(&input.dir);
-    
+
     for entry in dir_path.read_dir()? {
         total += 1;
         let entry = entry?;
@@ -133,11 +125,11 @@ async fn main() -> anyhow::Result<()> {
             let metadata: MetaData = serde_yaml::from_reader(file)?;
 
             match check_enum(&metadata.data) {
-               Err(e) => {
-                    println!("{}, {:?}",path.display(), e);
+                Err(e) => {
+                    println!("{}, {:?}", path.display(), e);
                     continue;
-                },
-               _ => ()
+                }
+                _ => (),
             };
 
             let url_regex =
@@ -210,52 +202,93 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Vec<String> {
+    let mut continuation_token: Option<String> = None;
+    let mut s3_file_list = Vec::new();
+
+    loop {
+        let request = rusoto_s3::ListObjectsV2Request {
+            bucket: bucket_name.to_string(),
+            continuation_token: continuation_token.clone(),
+            ..Default::default()
+        };
+
+        match client.list_objects_v2(request).await {
+            Ok(output) => {
+                if let Some(contents) = output.contents {
+                    s3_file_list.extend(
+                        contents
+                            .iter()
+                            .map(|item| item.key.clone().unwrap())
+                            .collect::<Vec<_>>(),
+                    )
+                }
+
+                if let Some(next_continuation_token) = output.next_continuation_token {
+                    continuation_token = Some(next_continuation_token);
+                } else {
+                    break;
+                }
+            }
+            Err(rusoto_core::RusotoError::Unknown(resp)) => {
+                eprintln!("Error: {}", resp.status);
+                break;
+            }
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                break;
+            }
+        }
+    }
+    s3_file_list
+}
+
 fn check_enum(data: &Data) -> anyhow::Result<()> {
     match data {
         Data::Test(test) => {
             match &test.course.type_ {
                 Some(test) => {
-                    if !["本科","研究生"].contains(&test.as_str()) {
+                    if !["本科", "研究生"].contains(&test.as_str()) {
                         return Err(anyhow::anyhow!("Invalid course type"));
                     }
-                },
-                None => ()
+                }
+                None => (),
             }
             match &test.time.stage {
                 Some(stage) => {
-                    if !["期中","期末"].contains(&stage.as_str()) {
+                    if !["期中", "期末"].contains(&stage.as_str()) {
                         return Err(anyhow::anyhow!("Invalid stage"));
                     }
-                },
-                None => ()
+                }
+                None => (),
             }
             match &test.time.semester {
                 Some(semester) => {
-                    if !["First","Second"].contains(&semester.as_str()) {
+                    if !["First", "Second"].contains(&semester.as_str()) {
                         return Err(anyhow::anyhow!("Invalid semester"));
                     }
-                },
-                None => ()
+                }
+                None => (),
             }
             for content in &test.content {
                 match content.as_str() {
                     "原题" => (),
                     "答案" => (),
-                    _ => return Err(anyhow::anyhow!("Invalid content"))
+                    _ => return Err(anyhow::anyhow!("Invalid content")),
                 }
             }
-        },
+        }
         Data::Book(_) => (),
         Data::Doc(doc) => {
             for course in &doc.course {
                 match &course.type_ {
                     Some(test) => {
-                        if !["本科","研究生"].contains(&test.as_str()) {
+                        if !["本科", "研究生"].contains(&test.as_str()) {
                             return Err(anyhow::anyhow!("Invalid course type"));
                         }
-                    },
-                    None => ()
-                }   
+                    }
+                    None => (),
+                }
             }
             for content in &doc.content {
                 match content.as_str() {
@@ -264,11 +297,11 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
                     "答案" => (),
                     "知识点" => (),
                     "课件" => (),
-                    _ => return Err(anyhow::anyhow!("Invalid content"))
+                    _ => return Err(anyhow::anyhow!("Invalid content")),
                 }
             }
         }
     }
 
-    Ok(()) 
+    Ok(())
 }
