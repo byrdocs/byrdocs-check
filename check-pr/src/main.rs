@@ -95,8 +95,6 @@ async fn main() -> anyhow::Result<()> {
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
     let s3_file_list = list_all_objects(&s3_client, &input.bucket).await;
 
-    println!("S3 file list: {:#?}", s3_file_list);
-
     let backend_client = reqwest::Client::new();
     let temp_files = backend_client
         .get(format!("{}/api/file/notPublished", input.backend_url))
@@ -120,7 +118,6 @@ async fn main() -> anyhow::Result<()> {
         }
         let path = entry.path();
         if path.is_file() {
-            println!("{}", path.display());
             let file = std::fs::File::open(&path)?;
             let metadata: MetaData = serde_yaml::from_reader(file)?;
 
