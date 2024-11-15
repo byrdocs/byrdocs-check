@@ -135,6 +135,8 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    println!("All done");
+
     Ok(())
 }
 
@@ -170,7 +172,7 @@ async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<S
     let mut raw_files = HashSet::new();
     for item in s3_obj {
         let key = item.key.clone().unwrap_or_default();
-        if key.ends_with(".pdf") || key.ends_with(".zip") {
+        if key.ends_with(".pdf") {
             raw_files.insert(key[..32].to_string());
         }
     }
@@ -261,7 +263,10 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Failed to load {} pdf files", error_count));
     }
 
-    println!("jpg Files generated");
+    println!(
+        "{} jpg Files generated",
+        Path::new("./tmp2").read_dir()?.count()
+    );
     Ok(())
 }
 
@@ -303,6 +308,7 @@ async fn generate_webp_files() -> anyhow::Result<()> {
 
 async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()> {
     let dir = Path::new("./tmp2");
+    println!("Uploading jpg files: {:#?}", dir.read_dir()?.count());
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
@@ -326,6 +332,7 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
         }
     }
     let dir = Path::new("./tmp3");
+    println!("Uploading webp files: {:#?}", dir.read_dir()?.count());
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
