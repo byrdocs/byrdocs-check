@@ -326,6 +326,7 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
                     .as_ref()
                     .to_string(),
                 body: Some(buf.into()),
+                content_type: Some("image/jpeg".to_string()),
                 ..Default::default()
             };
             s3_client.put_object(request).await?;
@@ -350,6 +351,7 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
                     .as_ref()
                     .to_string(),
                 body: Some(buf.into()),
+                content_type: Some("image/webp".to_string()),
                 ..Default::default()
             };
             s3_client.put_object(request).await?;
@@ -459,7 +461,7 @@ async fn merge_json(dir: &String, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
     }
     let temp_file_path = dir.join("metadata2.json");
     let mut temp_file = File::create(&temp_file_path).await?;
-    let json_data = serde_json::to_string_pretty(&json)?;
+    let json_data = serde_json::to_string(&json)?;
     temp_file.write_all(json_data.as_bytes()).await?;
     println!("Metadata JSON written to: {:?}", temp_file_path);
     //merge to json
@@ -482,6 +484,7 @@ async fn upload_metadata(
         bucket: r2_bucket.clone(),
         key: "metadata2.json".to_string(),
         body: Some(buf.into()),
+        content_type: Some("application/json".to_string()),
         ..Default::default()
     };
     r2_client.put_object(request).await?;
