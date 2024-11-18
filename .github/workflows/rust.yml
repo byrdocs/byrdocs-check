@@ -2,28 +2,20 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: ["local-check"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --release --verbose
-    - uses: actions/upload-artifact@v4
-      with:
-        name: check-cmt
-        path: target/release/check-cmt
-    - uses: actions/upload-artifact@v4
-      with:
-        name: check-pr
-        path: target/release/check-pr
-        
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --verbose
+      - uses: actions/upload-artifact@v4
+        with:
+          name: check-pr
+          path: target/release/check-pr

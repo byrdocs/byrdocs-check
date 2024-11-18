@@ -1,46 +1,17 @@
 mod metadata;
 
-use anyhow;
 use regex;
-use rusoto_core::HttpClient;
-use rusoto_s3::S3;
 use serde;
 use serde_yaml;
 use std::path::Path;
 use structopt::StructOpt;
-use tokio::{
-    self,
-    io::{AsyncReadExt, BufReader},
-};
 
 use crate::metadata::*;
 
 #[derive(StructOpt)]
 struct Input {
-    #[structopt(short = "d", long = "dir", help = "The path to check", required = true)]
+    #[structopt(help = "The path to check", required = true)]
     dir: String,
-    #[structopt(short = "u", long = "url", help = "S3 url", required = true)]
-    s3_url: String,
-    #[structopt(short = "b", long = "backend", help = "Backend url", required = true)]
-    backend_url: String,
-    #[structopt(short = "t", long = "token", help = "Token", required = true)]
-    backend_token: String,
-    #[structopt(
-        short = "a",
-        long = "ACCESS_KEY_ID",
-        help = "ACCESS_KEY_ID",
-        required = true
-    )]
-    assess_key_id: String,
-    #[structopt(
-        short = "s",
-        long = "SECRET_ACCESS_KEY",
-        help = "SECRET_ACCESS_KEY",
-        required = true
-    )]
-    secret_access_key: String,
-    #[structopt(short = "c", long = "bucket", help = "bucket name", required = true)]
-    bucket: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -78,31 +49,8 @@ enum Status {
     Uploaded,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let input = Input::from_args();
-
-    let end_point = input.s3_url;
-    let http_client = HttpClient::new()?;
-    let credentials = rusoto_core::credential::StaticProvider::new_minimal(
-        input.assess_key_id,
-        input.secret_access_key,
-    );
-    let region = rusoto_core::Region::Custom {
-        name: "byr".to_owned(),
-        endpoint: end_point,
-    };
-    let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
-    let s3_file_list = list_all_objects(&s3_client, &input.bucket).await;
-
-    let backend_client = reqwest::Client::new();
-    let temp_files = backend_client
-        .get(format!("{}/api/file/notPublished", input.backend_url))
-        .bearer_auth(input.backend_token)
-        .send()
-        .await?
-        .json::<ApiResult>()
-        .await?;
 
     let mut success_book = 0;
     let mut success_test = 0;
@@ -139,11 +87,6 @@ async fn main() -> anyhow::Result<()> {
                 regex::Regex::new(r"^https://byrdocs\.org/files/[a-fA-F0-9]{32}\.(pdf|zip)$")
                     .unwrap();
 
-            if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
-                println!("Not found in S3: {}", path.display());
-                continue;
-            }
-
             if !url_regex.is_match(&metadata.url) | !metadata.url.contains(metadata.id.as_str()) {
                 println!("请检查url与id是否匹配: {}", path.display());
                 continue;
@@ -154,33 +97,6 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
 
-            for temp_file in &temp_files.files {
-                if temp_file.file_name.as_str() == format!("{}.pdf", metadata.id)
-                    || temp_file.file_name.as_str() == format!("{}.zip", metadata.id)
-                {
-                    match temp_file.status {
-                        Status::Published => {
-                            println!("Published: {}", path.display());
-                        }
-                        _ => {
-                            let request = rusoto_s3::GetObjectRequest {
-                                bucket: input.bucket.clone(),
-                                key: metadata.url[metadata.url.len() - 36..].to_string(),
-                                ..Default::default()
-                            };
-                            let file = s3_client.get_object(request).await?.body.unwrap();
-                            let mut reader = BufReader::new(file.into_async_read());
-                            let mut buffer = Vec::new();
-                            reader.read_to_end(&mut buffer).await?;
-                            let md5 = md5::compute(&buffer);
-                            if !(format!("{:x}", md5) == metadata.id) {
-                                println!("MD5 not match: {}", path.display());
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
             match metadata.data {
                 Data::Test(_) => {
                     success_test += 1;
@@ -206,47 +122,6 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Some files are invalid"));
     }
     Ok(())
-}
-
-async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Vec<String> {
-    let mut continuation_token: Option<String> = None;
-    let mut s3_file_list = Vec::new();
-
-    loop {
-        let request = rusoto_s3::ListObjectsV2Request {
-            bucket: bucket_name.to_string(),
-            continuation_token: continuation_token.clone(),
-            ..Default::default()
-        };
-
-        match client.list_objects_v2(request).await {
-            Ok(output) => {
-                if let Some(contents) = output.contents {
-                    s3_file_list.extend(
-                        contents
-                            .iter()
-                            .map(|item| item.key.clone().unwrap())
-                            .collect::<Vec<_>>(),
-                    )
-                }
-
-                if let Some(next_continuation_token) = output.next_continuation_token {
-                    continuation_token = Some(next_continuation_token);
-                } else {
-                    break;
-                }
-            }
-            Err(rusoto_core::RusotoError::Unknown(resp)) => {
-                eprintln!("Error: {}", resp.status);
-                break;
-            }
-            Err(e) => {
-                eprintln!("Error: {:?}", e);
-                break;
-            }
-        }
-    }
-    s3_file_list
 }
 
 fn check_enum(data: &Data) -> anyhow::Result<()> {
