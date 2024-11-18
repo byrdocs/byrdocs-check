@@ -8,14 +8,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: cargo build --release --verbose
-      - uses: actions/upload-artifact@v4
-        with:
-          name: check-pr
-          path: target/release/check-pr
+    - uses: actions/checkout@v4
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features
+    - name: Test
+      run: cargo test
+
+  build_martix:
+    strategy:
+      matrix: 
+        os: [macos-13, macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --release --verbose
+    - uses: actions/upload-artifact@v4
+      with:
+        name: check-pr
+        path: target/release/check-pr
+    - name: Upload
+      uses: actions/upload-artifact@v4.4.3
+      with:
+        name: byrdocs-check-${{ runner.os }}-${{ runner.arch }}
+        path: target/release/check-pr
+    
