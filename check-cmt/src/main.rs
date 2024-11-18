@@ -112,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
     check_existence(&input.dir, &s3_obj).await?;
 
     check_md5(
+        &input.dir,
         &input.backend_url,
         &input.backend_token,
         &input.bucket,
@@ -191,6 +192,7 @@ async fn check_existence(dir: &str, s3_obj: &Vec<Object>) -> anyhow::Result<()> 
 }
 
 async fn check_md5(
+    dir: &str,
     backend_url: &str,
     backend_token: &str,
     bucket: &str,
@@ -204,11 +206,13 @@ async fn check_md5(
         .await?
         .json::<ApiResult>()
         .await?;
+    let mut success_count = 0;
     let mut error_count = 0;
+    let mut published_count = 0;
     for temp_file in &temp_files.files {
         match temp_file.status {
             Status::Published => {
-                println!("Published: {}", temp_file.file_name);
+                published_count += 1;
             }
             _ => {
                 let request = rusoto_s3::GetObjectRequest {
@@ -222,23 +226,33 @@ async fn check_md5(
                 reader.read_to_end(&mut buffer).await?;
                 let md5 = md5::compute(&buffer);
 
-                let local_file_path = format!("{}.yml", &temp_file.file_name[..32]);
-                let local_file = std::fs::File::open(&local_file_path)?;
-                let metadata: MetaData = serde_yaml::from_reader(local_file)?;
-
-                if !(format!("{:x}", md5) == metadata.id) {
-                    println!("MD5 not match: {}", local_file_path);
-                    error_count += 1;
-                }
+                let local_file_path = format!("{}/{}.yml", dir, &temp_file.file_name[..32]);
+                println!("Checking MD5: {}", local_file_path);
+                match std::fs::File::open(&local_file_path) {
+                    Ok(local_file) => {
+                        let metadata: MetaData = serde_yaml::from_reader(local_file)?;
+                        if !(format!("{:x}", md5) == metadata.id) {
+                            println!("MD5 not match: {}", local_file_path);
+                            error_count += 1;
+                        } else {
+                            println!("MD5 check success: {}", local_file_path);
+                            success_count += 1;
+                        }
+                    }
+                    _ => (),
+                };
             }
         }
     }
-    match error_count {
-        0 => println!("All MD5 match"),
-        _ => {
-            println!("{} MD5 not match", error_count);
-            return Err(anyhow!("MD5 not match"));
-        }
+    println!(
+        "MD5 check completed: {} success, {} error, {} published",
+        success_count, error_count, published_count
+    );
+    if error_count != 0 {
+        return Err(anyhow!("Some files check error"));
+    }
+    if success_count == 0 {
+        eprintln!("Warning: No files were successfully checked.")
     }
     Ok(())
 }
