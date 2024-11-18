@@ -297,17 +297,10 @@ name = "check-pr"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "md5",
  "regex",
- "reqwest",
- "rusoto",
- "rusoto_core",
- "rusoto_s3",
  "serde",
- "serde_json",
  "serde_yaml",
  "structopt",
- "tokio",
 ]
 
 [[package]]

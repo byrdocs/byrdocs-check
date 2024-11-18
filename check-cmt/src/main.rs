@@ -1,6 +1,6 @@
 mod metadata;
 
-use anyhow;
+use anyhow::anyhow;
 use pdfium_render::prelude::*;
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
@@ -107,12 +107,28 @@ async fn main() -> anyhow::Result<()> {
     let s3_client =
         get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
-    let files_need_update = get_files_need_update(&s3_obj).await?;
+    let files_need_update_cover = get_files_need_update(&s3_obj).await?;
+
+    check_existence(&input.dir, &s3_obj).await?;
+
+    check_md5(
+        &input.backend_url,
+        &input.backend_token,
+        &input.bucket,
+        &s3_client,
+    )
+    .await?;
 
     std::fs::create_dir_all("./tmp1")?;
     std::fs::create_dir_all("./tmp2")?;
     std::fs::create_dir_all("./tmp3")?;
-    download_files(&s3_client, &s3_obj, files_need_update, input.bucket.clone()).await?;
+    download_files(
+        &s3_client,
+        &s3_obj,
+        files_need_update_cover,
+        input.bucket.clone(),
+    )
+    .await?;
 
     generate_jpg_files().await?;
 
@@ -137,6 +153,93 @@ async fn main() -> anyhow::Result<()> {
 
     println!("All done");
 
+    Ok(())
+}
+
+async fn check_existence(dir: &str, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
+    let s3_file_list = s3_obj
+        .iter()
+        .map(|file| file.key.clone().unwrap())
+        .collect::<HashSet<_>>();
+    let dir = Path::new(dir);
+    let mut error_count = 0;
+    for entry in dir.read_dir()? {
+        let entry = entry?;
+        if !entry.file_name().to_str().unwrap().ends_with(".yml") {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_file() {
+            let file = std::fs::File::open(&path)?;
+            let metadata: MetaData = serde_yaml::from_reader(file)?;
+            if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
+                println!("Not found in S3: {}", path.display());
+                error_count += 1;
+                continue;
+            }
+        }
+    }
+    match error_count {
+        0 => println!("All files found in S3"),
+        _ => {
+            println!("{} files not found in S3", error_count);
+            return Err(anyhow!("file not found"));
+        }
+    }
+    //Check existence
+    Ok(())
+}
+
+async fn check_md5(
+    backend_url: &str,
+    backend_token: &str,
+    bucket: &str,
+    s3_client: &S3Client,
+) -> anyhow::Result<()> {
+    let backend_client = reqwest::Client::new();
+    let temp_files = backend_client
+        .get(format!("{}/api/file/notPublished", backend_url))
+        .bearer_auth(backend_token)
+        .send()
+        .await?
+        .json::<ApiResult>()
+        .await?;
+    let mut error_count = 0;
+    for temp_file in &temp_files.files {
+        match temp_file.status {
+            Status::Published => {
+                println!("Published: {}", temp_file.file_name);
+            }
+            _ => {
+                let request = rusoto_s3::GetObjectRequest {
+                    bucket: bucket.to_string(),
+                    key: temp_file.file_name.clone(),
+                    ..Default::default()
+                };
+                let file = s3_client.get_object(request).await?.body.unwrap();
+                let mut reader = BufReader::new(file.into_async_read());
+                let mut buffer = Vec::new();
+                reader.read_to_end(&mut buffer).await?;
+                let md5 = md5::compute(&buffer);
+
+                let local_file_path = format!("{}.yml", &temp_file.file_name[..32]);
+                let local_file = std::fs::File::open(&local_file_path)?;
+                let metadata: MetaData = serde_yaml::from_reader(local_file)?;
+
+                if !(format!("{:x}", md5) == metadata.id) {
+                    println!("MD5 not match: {}", local_file_path);
+                    error_count += 1;
+                }
+            }
+        }
+    }
+    match error_count {
+        0 => println!("All MD5 match"),
+        _ => {
+            println!("{} MD5 not match", error_count);
+            return Err(anyhow!("MD5 not match"));
+        }
+    }
     Ok(())
 }
 
