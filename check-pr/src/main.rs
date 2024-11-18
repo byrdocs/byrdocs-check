@@ -119,11 +119,17 @@ async fn main() -> anyhow::Result<()> {
         let path = entry.path();
         if path.is_file() {
             let file = std::fs::File::open(&path)?;
-            let metadata: MetaData = serde_yaml::from_reader(file)?;
+            let metadata: MetaData = match serde_yaml::from_reader(file) {
+                Ok(metadata) => metadata,
+                Err(e) => {
+                    eprintln!("{}, {:?}", path.display(), e);
+                    continue;
+                }
+            };
 
             match check_enum(&metadata.data) {
                 Err(e) => {
-                    println!("{}, {:?}", path.display(), e);
+                    eprintln!("{}, {:?}", path.display(), e);
                     continue;
                 }
                 _ => (),
@@ -132,16 +138,19 @@ async fn main() -> anyhow::Result<()> {
             let url_regex =
                 regex::Regex::new(r"^https://byrdocs\.org/files/[a-fA-F0-9]{32}\.(pdf|zip)$")
                     .unwrap();
-            if !url_regex.is_match(&metadata.url) | !metadata.url.contains(metadata.id.as_str()) {
-                println!("Invalid URL or id: {}", path.display());
-                continue;
-            }
+
             if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
                 println!("Not found in S3: {}", path.display());
                 continue;
             }
+
+            if !url_regex.is_match(&metadata.url) | !metadata.url.contains(metadata.id.as_str()) {
+                println!("请检查url与id是否匹配: {}", path.display());
+                continue;
+            }
+
             if !(path.file_name().unwrap().to_str().unwrap() == format!("{}.yml", metadata.id)) {
-                println!("Invalid file name: {}", path.display());
+                println!("请检查文件名与id是否匹配: {}", path.display());
                 continue;
             }
 
@@ -246,7 +255,9 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
             match &test.course.type_ {
                 Some(test) => {
                     if !["本科", "研究生"].contains(&test.as_str()) {
-                        return Err(anyhow::anyhow!("Invalid course type"));
+                        return Err(anyhow::anyhow!(
+                            "请检查course type，只能为\"本科\"或\"研究生\""
+                        ));
                     }
                 }
                 None => (),
@@ -254,7 +265,7 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
             match &test.time.stage {
                 Some(stage) => {
                     if !["期中", "期末"].contains(&stage.as_str()) {
-                        return Err(anyhow::anyhow!("Invalid stage"));
+                        return Err(anyhow::anyhow!("请检查stage，只能为\"期中\"或\"期末\""));
                     }
                 }
                 None => (),
@@ -262,7 +273,9 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
             match &test.time.semester {
                 Some(semester) => {
                     if !["First", "Second"].contains(&semester.as_str()) {
-                        return Err(anyhow::anyhow!("Invalid semester"));
+                        return Err(anyhow::anyhow!(
+                            "请检查semester，只能为\"First\"或\"Second\""
+                        ));
                     }
                 }
                 None => (),
@@ -271,7 +284,11 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
                 match content.as_str() {
                     "原题" => (),
                     "答案" => (),
-                    _ => return Err(anyhow::anyhow!("Invalid content")),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "错误的content，content只能为\"原题\"或\"答案\""
+                        ))
+                    }
                 }
             }
         }
@@ -281,7 +298,9 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
                 match &course.type_ {
                     Some(test) => {
                         if !["本科", "研究生"].contains(&test.as_str()) {
-                            return Err(anyhow::anyhow!("Invalid course type"));
+                            return Err(anyhow::anyhow!(
+                                "请检查course type，只能为\"本科\"或\"研究生\""
+                            ));
                         }
                     }
                     None => (),
@@ -294,7 +313,11 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
                     "答案" => (),
                     "知识点" => (),
                     "课件" => (),
-                    _ => return Err(anyhow::anyhow!("Invalid content")),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            r#"错误的content，content只能为"思维导图"、"题库"、"答案"、"知识点"或"课件""#
+                        ))
+                    }
                 }
             }
         }
