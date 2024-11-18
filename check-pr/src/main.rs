@@ -291,6 +291,14 @@ fn check_enum(data: &Data) -> anyhow::Result<()> {
                     }
                 }
             }
+            match &test.college {
+                Some(colleges) => {
+                    if colleges.contains(&"".to_string()) {
+                        return Err(anyhow::anyhow!("college不能存在空字符串"));
+                    }
+                }
+                _ => (),
+            }
         }
         Data::Book(_) => (),
         Data::Doc(doc) => {

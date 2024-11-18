@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub enum Type {
     #[serde(rename = "test")]
     Test,
@@ -11,6 +12,7 @@ pub enum Type {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub enum Data {
     Test(Test),
@@ -28,6 +30,7 @@ pub struct MetaData {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Test {
     pub title: String,
@@ -39,6 +42,7 @@ pub struct Test {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Time {
     start: String,
@@ -48,6 +52,7 @@ pub struct Time {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Course {
     #[serde(rename = "type")]
@@ -56,18 +61,21 @@ pub struct Course {
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Book {
     title: String,
     authors: Vec<String>,
     translators: Vec<String>,
     edition: Option<String>,
+    publish_year: Option<String>,
     publisher: String,
     isbn: Vec<String>,
     filetype: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Doc {
     title: String,

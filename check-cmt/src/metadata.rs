@@ -63,6 +63,7 @@ pub struct Book {
     translators: Vec<String>,
     edition: Option<String>,
     publisher: String,
+    publish_year: Option<String>,
     isbn: Vec<String>,
     filetype: String,
     pub filesize: Option<u64>,
