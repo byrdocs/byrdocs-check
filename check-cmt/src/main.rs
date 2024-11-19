@@ -369,7 +369,7 @@ async fn publish_files(
     for file in path.read_dir()? {
         let file = file?;
         let path = file.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yml") {
             let file_name = path
                 .file_name()
                 .unwrap()
@@ -403,6 +403,7 @@ async fn publish_files(
             ids.push(file.id);
         }
     }
+    println!("Publishing files: {:#?}", ids);
     backend_client
         .post(format!("{}/api/file/publish", backend_url))
         .bearer_auth(backend_token)
