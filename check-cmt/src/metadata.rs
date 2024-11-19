@@ -1,6 +1,7 @@
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone, Copy)]
+#[serde(deny_unknown_fields)]
 pub enum Type {
     #[serde(rename = "test")]
     Test,
@@ -10,14 +11,16 @@ pub enum Type {
     Doc,
 }
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
 pub enum Data {
     Test(Test),
     Book(Book),
     Doc(Doc),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct MetaData {
     pub id: String,
@@ -26,10 +29,11 @@ pub struct MetaData {
     pub data: Data,
 }
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Test {
-    pub title: String,
+    #[serde(skip_serializing_if = "is_none_or_empty")]
     pub college: Option<Vec<String>>,
     pub course: Course,
     pub time: Time,
@@ -38,42 +42,52 @@ pub struct Test {
     pub filesize: Option<u64>,
 }
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Time {
-    start: String,
-    end: String,
+    pub start: String,
+    pub end: String,
+    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub semester: Option<String>,
+    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub stage: Option<String>,
 }
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Course {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "is_none_or_empty_string")]
     pub type_: Option<String>,
-    pub name: Option<String>,
+    pub name: String,
 }
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Book {
     pub title: String,
     pub authors: Vec<String>,
+    #[serde(skip_serializing_if = "is_none_or_empty")]
     pub translators: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub edition: Option<String>,
+    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub publish_year: Option<String>,
+    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub publisher: Option<String>,
     pub isbn: Vec<String>,
     pub filetype: String,
     pub filesize: Option<u64>,
 }
 
-#[derive(serde::Deserialize, Debug, Serialize)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Doc {
-    title: String,
-    filetype: String,
+    pub title: String,
+    pub filetype: String,
     pub course: Vec<Course>,
     pub content: Vec<String>,
     pub filesize: Option<u64>,
@@ -137,5 +151,19 @@ impl Serialize for MetaData {
             }
         }
         state.end()
+    }
+}
+
+fn is_none_or_empty(vec: &Option<Vec<String>>) -> bool {
+    match vec {
+        None => true,
+        Some(vec) => vec.is_empty(),
+    }
+}
+
+fn is_none_or_empty_string(string: &Option<String>) -> bool {
+    match string {
+        None => true,
+        Some(string) => string.is_empty(),
     }
 }
