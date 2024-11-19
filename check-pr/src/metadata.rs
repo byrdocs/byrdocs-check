@@ -64,22 +64,22 @@ pub struct Course {
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Book {
-    title: String,
-    authors: Vec<String>,
-    translators: Vec<String>,
-    edition: Option<String>,
-    publish_year: Option<String>,
-    publisher: String,
-    isbn: Vec<String>,
-    filetype: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub translators: Option<Vec<String>>,
+    pub edition: Option<String>,
+    pub publish_year: Option<String>,
+    pub publisher: Option<String>,
+    pub isbn: Vec<String>,
+    pub filetype: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Doc {
-    title: String,
-    filetype: String,
+    pub title: String,
+    pub filetype: String,
     pub course: Vec<Course>,
     pub content: Vec<String>,
 }

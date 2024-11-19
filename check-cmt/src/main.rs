@@ -1,12 +1,9 @@
 mod metadata;
 
-use anyhow;
-use pdfium_render::prelude::*;
+use pdfium_render::prelude::{PdfPageRenderRotation, PdfRenderConfig, Pdfium};
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
-use serde;
 use serde_json::json;
-use serde_yaml;
 use std::{collections::HashSet, path::Path};
 use structopt::StructOpt;
 use tokio::fs::File;
@@ -201,7 +198,7 @@ async fn download_files(
     let dir = Path::new("./tmp1");
     for file in s3_obj {
         let key = file.key.clone().unwrap();
-        if files_need_update.contains(&key[..32].to_string()) && key.ends_with(".pdf") {
+        if files_need_update.contains(&key[..32]) && key.ends_with(".pdf") {
             let request = rusoto_s3::GetObjectRequest {
                 bucket: bucket.clone(),
                 key: key.clone(),
@@ -248,7 +245,7 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
                 document.save_with_format(
                     format!(
                         "./tmp2/{}.jpg",
-                        path.file_name().unwrap().to_str().unwrap()[..32].to_string()
+                        &path.file_name().unwrap().to_str().unwrap()[..32]
                     ),
                     image::ImageFormat::Jpeg,
                 )?;
@@ -402,7 +399,7 @@ async fn publish_files(
         .collect::<HashSet<_>>();
     let mut ids = Vec::new();
     for file in temp_files.files {
-        if publish_list.contains(&file.file_name[..32].to_string()) {
+        if publish_list.contains(&file.file_name[..32]) {
             ids.push(file.id);
         }
     }
@@ -419,8 +416,8 @@ async fn publish_files(
     Ok(())
 }
 
-async fn merge_json(dir: &String, s3_obj: &Vec<Object>) -> anyhow::Result<()> {
-    let dir = Path::new(dir.as_str());
+async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
+    let dir = Path::new(dir);
     let mut json = Vec::new();
     for metadata in dir.read_dir()? {
         let metadata = metadata?;

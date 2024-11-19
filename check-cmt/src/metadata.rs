@@ -58,14 +58,14 @@ pub struct Course {
 #[derive(serde::Deserialize, Debug, Serialize)]
 #[allow(dead_code)]
 pub struct Book {
-    title: String,
-    authors: Vec<String>,
-    translators: Vec<String>,
-    edition: Option<String>,
-    publisher: String,
-    publish_year: Option<String>,
-    isbn: Vec<String>,
-    filetype: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub translators: Option<Vec<String>>,
+    pub edition: Option<String>,
+    pub publish_year: Option<String>,
+    pub publisher: Option<String>,
+    pub isbn: Vec<String>,
+    pub filetype: String,
     pub filesize: Option<u64>,
 }
 
