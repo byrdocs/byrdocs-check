@@ -103,20 +103,13 @@ async fn main() -> anyhow::Result<()> {
     let s3_client =
         get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
-    let files_need_update = get_files_need_update(&s3_obj).await?;
     let temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
+    let files_need_update = get_files_need_update(&s3_obj, &temp_files).await?;
 
     std::fs::create_dir_all("./tmp1")?;
     std::fs::create_dir_all("./tmp2")?;
     std::fs::create_dir_all("./tmp3")?;
-    download_files(
-        &s3_client,
-        &s3_obj,
-        files_need_update,
-        input.bucket.clone(),
-        &temp_files,
-    )
-    .await?;
+    download_files(&s3_client, &s3_obj, files_need_update, input.bucket.clone()).await?;
 
     generate_jpg_files().await?;
 
@@ -166,7 +159,10 @@ async fn get_s3_client(
     Ok(s3_client)
 }
 
-async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<String>> {
+async fn get_files_need_update(
+    s3_obj: &Vec<Object>,
+    temp_files: &ApiResult,
+) -> anyhow::Result<HashSet<String>> {
     let mut jpg_files = HashSet::new();
     let mut webp_files = HashSet::new();
     for item in s3_obj {
@@ -182,7 +178,7 @@ async fn get_files_need_update(s3_obj: &Vec<Object>) -> anyhow::Result<HashSet<S
     let mut raw_files = HashSet::new();
     for item in s3_obj {
         let key = item.key.clone().unwrap_or_default();
-        if key.ends_with(".pdf") {
+        if key.ends_with(".pdf") && !temp_files.files.iter().any(|file| file.file_name == key) {
             raw_files.insert(key[..32].to_string());
         }
     }
@@ -206,16 +202,12 @@ async fn download_files(
     s3_obj: &Vec<Object>,
     files_need_update: HashSet<String>,
     bucket: String,
-    temp_files: &ApiResult,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all("./tmp1")?;
     let dir = Path::new("./tmp1");
     for file in s3_obj {
         let key = file.key.clone().unwrap();
-        if files_need_update.contains(&key[..32])
-            && key.ends_with(".pdf")
-            && !temp_files.files.iter().any(|file| file.file_name == key)
-        {
+        if files_need_update.contains(&key[..32]) && key.ends_with(".pdf") {
             let request = rusoto_s3::GetObjectRequest {
                 bucket: bucket.clone(),
                 key: key.clone(),
