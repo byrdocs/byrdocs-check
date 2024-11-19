@@ -11,7 +11,6 @@ use tokio::{
     self,
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
 };
-use webp;
 use webp::Encoder;
 
 use metadata::*;
@@ -105,11 +104,19 @@ async fn main() -> anyhow::Result<()> {
         get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
     let files_need_update = get_files_need_update(&s3_obj).await?;
+    let temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
 
     std::fs::create_dir_all("./tmp1")?;
     std::fs::create_dir_all("./tmp2")?;
     std::fs::create_dir_all("./tmp3")?;
-    download_files(&s3_client, &s3_obj, files_need_update, input.bucket.clone()).await?;
+    download_files(
+        &s3_client,
+        &s3_obj,
+        files_need_update,
+        input.bucket.clone(),
+        &temp_files,
+    )
+    .await?;
 
     generate_jpg_files().await?;
 
@@ -119,7 +126,13 @@ async fn main() -> anyhow::Result<()> {
 
     //image part over
 
-    publish_files(input.backend_url, input.backend_token, &input.dir).await?;
+    publish_files(
+        input.backend_url,
+        input.backend_token,
+        &input.dir,
+        &temp_files,
+    )
+    .await?;
 
     merge_json(&input.dir, &s3_obj).await?;
 
@@ -193,12 +206,16 @@ async fn download_files(
     s3_obj: &Vec<Object>,
     files_need_update: HashSet<String>,
     bucket: String,
+    temp_files: &ApiResult,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all("./tmp1")?;
     let dir = Path::new("./tmp1");
     for file in s3_obj {
         let key = file.key.clone().unwrap();
-        if files_need_update.contains(&key[..32]) && key.ends_with(".pdf") {
+        if files_need_update.contains(&key[..32])
+            && key.ends_with(".pdf")
+            && !temp_files.files.iter().any(|file| file.file_name == key)
+        {
             let request = rusoto_s3::GetObjectRequest {
                 bucket: bucket.clone(),
                 key: key.clone(),
@@ -359,10 +376,23 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
     Ok(())
 }
 
+async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Result<ApiResult> {
+    let backend_client = reqwest::Client::new();
+    let temp_files = backend_client
+        .get(format!("{}/api/file/notPublished", backend_url))
+        .bearer_auth(backend_token)
+        .send()
+        .await?
+        .json::<ApiResult>()
+        .await?;
+    Ok(temp_files)
+}
+
 async fn publish_files(
     backend_url: String,
     backend_token: String,
     dir: &str,
+    temp_files: &ApiResult,
 ) -> anyhow::Result<()> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
@@ -380,14 +410,6 @@ async fn publish_files(
         }
     }
 
-    let backend_client = reqwest::Client::new();
-    let temp_files = backend_client
-        .get(format!("{}/api/file/notPublished", backend_url))
-        .bearer_auth(backend_token.clone())
-        .send()
-        .await?
-        .json::<ApiResult>()
-        .await?;
     let temp_filename = temp_files
         .files
         .iter()
@@ -398,12 +420,13 @@ async fn publish_files(
         .cloned()
         .collect::<HashSet<_>>();
     let mut ids = Vec::new();
-    for file in temp_files.files {
+    for file in &temp_files.files {
         if publish_list.contains(&file.file_name[..32]) {
             ids.push(file.id);
         }
     }
     println!("Publishing files: {:#?}", ids);
+    let backend_client = reqwest::Client::new();
     backend_client
         .post(format!("{}/api/file/publish", backend_url))
         .bearer_auth(backend_token)
