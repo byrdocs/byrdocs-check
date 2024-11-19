@@ -33,7 +33,6 @@ pub struct MetaData {
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Test {
-    pub title: String,
     pub college: Option<Vec<String>>,
     pub course: Course,
     pub time: Time,
@@ -45,8 +44,8 @@ pub struct Test {
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Time {
-    start: String,
-    end: String,
+    pub start: String,
+    pub end: String,
     pub semester: Option<String>,
     pub stage: Option<String>,
 }
@@ -57,29 +56,29 @@ pub struct Time {
 pub struct Course {
     #[serde(rename = "type")]
     pub type_: Option<String>,
-    pub name: Option<String>,
+    pub name: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Book {
-    title: String,
-    authors: Vec<String>,
-    translators: Vec<String>,
-    edition: Option<String>,
-    publish_year: Option<String>,
-    publisher: String,
-    isbn: Vec<String>,
-    filetype: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub translators: Option<Vec<String>>,
+    pub edition: Option<String>,
+    pub publish_year: Option<String>,
+    pub publisher: Option<String>,
+    pub isbn: Vec<String>,
+    pub filetype: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Doc {
-    title: String,
-    filetype: String,
+    pub title: String,
+    pub filetype: String,
     pub course: Vec<Course>,
     pub content: Vec<String>,
 }
