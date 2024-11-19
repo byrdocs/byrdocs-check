@@ -334,8 +334,8 @@ fn check_test(test: &Test) -> anyhow::Result<()> {
         }
     }
     if let (Ok(start), Ok(end)) = (test.time.start.parse::<u32>(), test.time.end.parse::<u32>()) {
-        if start > end {
-            errors.push(anyhow::anyhow!("开始时间不能晚于结束时间"));
+        if !(start == end || start + 1 == end) {
+            errors.push(anyhow::anyhow!("请检查时间"));
         }
     } else {
         errors.push(anyhow::anyhow!("时间格式不正确"));
