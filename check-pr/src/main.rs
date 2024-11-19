@@ -299,21 +299,22 @@ fn check_book(book: &Book) -> anyhow::Result<()> {
 }
 
 fn check_test(test: &Test) -> anyhow::Result<()> {
+    let mut errors = Vec::new();
     if let Some(test) = &test.course.type_ {
         if !["本科", "研究生"].contains(&test.as_str()) {
-            return Err(anyhow::anyhow!(
+            errors.push(anyhow::anyhow!(
                 "请检查course type，只能为\"本科\"或\"研究生\""
             ));
         }
     }
     if let Some(stage) = &test.time.stage {
         if !["期中", "期末"].contains(&stage.as_str()) {
-            return Err(anyhow::anyhow!("请检查stage，只能为\"期中\"或\"期末\""));
+            errors.push(anyhow::anyhow!("请检查stage，只能为\"期中\"或\"期末\""));
         }
     }
     if let Some(semester) = &test.time.semester {
         if !["First", "Second"].contains(&semester.as_str()) {
-            return Err(anyhow::anyhow!(
+            errors.push(anyhow::anyhow!(
                 "请检查semester，只能为\"First\"或\"Second\""
             ));
         }
@@ -322,30 +323,53 @@ fn check_test(test: &Test) -> anyhow::Result<()> {
         match content.as_str() {
             "原题" => (),
             "答案" => (),
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "错误的content，content只能为\"原题\"或\"答案\""
-                ))
-            }
+            _ => errors.push(anyhow::anyhow!(
+                "错误的content，content只能为\"原题\"或\"答案\""
+            )),
         }
     }
     if let Some(colleges) = &test.college {
         if colleges.contains(&"".to_string()) {
-            return Err(anyhow::anyhow!("college不能存在空字符串"));
+            errors.push(anyhow::anyhow!("college不能存在空字符串"));
         }
     }
-    Ok(())
+    if let (Ok(start), Ok(end)) = (test.time.start.parse::<u32>(), test.time.end.parse::<u32>()) {
+        if start > end {
+            errors.push(anyhow::anyhow!("开始时间不能晚于结束时间"));
+        }
+    } else {
+        errors.push(anyhow::anyhow!("时间格式不正确"));
+    }
+    if test.filetype != "pdf" && test.filetype != "zip" {
+        errors.push(anyhow::anyhow!("请检查filetype，只能为pdf或zip"));
+    }
+    if test.content.len() == 0 {
+        errors.push(anyhow::anyhow!("content不能为空"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        Err(anyhow::anyhow!(error_messages.join(", ")))
+    }
 }
 
 fn check_doc(doc: &Doc) -> anyhow::Result<()> {
+    let mut errors = Vec::new();
+    if &doc.course.len() == &0 {
+        errors.push(anyhow::anyhow!("course不能为空"));
+    }
     for course in &doc.course {
         if let Some(test) = &course.type_ {
             if !["本科", "研究生"].contains(&test.as_str()) {
-                return Err(anyhow::anyhow!(
+                errors.push(anyhow::anyhow!(
                     "请检查course type，只能为\"本科\"或\"研究生\""
                 ));
             }
         }
+    }
+    if &doc.content.len() == &0 {
+        errors.push(anyhow::anyhow!("content不能为空"));
     }
     for content in &doc.content {
         match content.as_str() {
@@ -354,14 +378,20 @@ fn check_doc(doc: &Doc) -> anyhow::Result<()> {
             "答案" => (),
             "知识点" => (),
             "课件" => (),
-            _ => {
-                return Err(anyhow::anyhow!(
-                    r#"错误的content，content只能为"思维导图"、"题库"、"答案"、"知识点"或"课件""#
-                ))
-            }
+            _ => errors.push(anyhow::anyhow!(
+                r#"错误的content，content只能为"思维导图"、"题库"、"答案"、"知识点"或"课件""#
+            )),
         }
     }
-    Ok(())
+    if doc.filetype != "pdf" && doc.filetype != "zip" {
+        errors.push(anyhow::anyhow!("请检查filetype，只能为pdf或zip"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        Err(anyhow::anyhow!(error_messages.join(", ")))
+    }
 }
 
 #[cfg(test)]

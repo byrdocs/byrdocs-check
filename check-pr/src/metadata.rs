@@ -33,7 +33,6 @@ pub struct MetaData {
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Test {
-    pub title: String,
     pub college: Option<Vec<String>>,
     pub course: Course,
     pub time: Time,
@@ -45,8 +44,8 @@ pub struct Test {
 #[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct Time {
-    start: String,
-    end: String,
+    pub start: String,
+    pub end: String,
     pub semester: Option<String>,
     pub stage: Option<String>,
 }
@@ -57,7 +56,7 @@ pub struct Time {
 pub struct Course {
     #[serde(rename = "type")]
     pub type_: Option<String>,
-    pub name: Option<String>,
+    pub name: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
