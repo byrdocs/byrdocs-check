@@ -103,7 +103,18 @@ async fn main() -> anyhow::Result<()> {
     let s3_client =
         get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
-    let temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
+    let mut temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
+
+    publish_files(
+        input.backend_url,
+        input.backend_token,
+        &input.dir,
+        &mut temp_files,
+    )
+    .await?; // publish files and remove published files from temp_files
+
+    //image part
+
     let files_need_update = get_files_need_update(&s3_obj, &temp_files).await?;
 
     std::fs::create_dir_all("./tmp1")?;
@@ -118,14 +129,6 @@ async fn main() -> anyhow::Result<()> {
     upload_files(&s3_client, input.bucket).await?;
 
     //image part over
-
-    publish_files(
-        input.backend_url,
-        input.backend_token,
-        &input.dir,
-        &temp_files,
-    )
-    .await?;
 
     merge_json(&input.dir, &s3_obj).await?;
 
@@ -384,7 +387,7 @@ async fn publish_files(
     backend_url: String,
     backend_token: String,
     dir: &str,
-    temp_files: &ApiResult,
+    temp_files: &mut ApiResult,
 ) -> anyhow::Result<()> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
@@ -427,6 +430,11 @@ async fn publish_files(
         }))
         .send()
         .await?;
+
+    temp_files
+        .files
+        .retain(|file| !publish_list.contains(&file.file_name[..32])); // Remove published files
+
     //Publish files
     println!("Files published");
     Ok(())
