@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
-            if let Err(e) = check(&metadata.data) {
+            if let Err(e) = check(&metadata.data, &metadata.id) {
                 eprintln!("{}, {:?}", path.display(), e);
                 continue;
             };
@@ -249,19 +249,19 @@ async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Ve
 
 use std::sync::Mutex;
 use std::sync::OnceLock;
-static ISBNS: OnceLock<Mutex<Vec<isbn::Isbn13>>> = OnceLock::new();
+static ISBNS: OnceLock<Mutex<Vec<(isbn::Isbn13, String)>>> = OnceLock::new();
 
-fn check(data: &Data) -> anyhow::Result<()> {
+fn check(data: &Data, md5: &str) -> anyhow::Result<()> {
     match data {
         Data::Test(test) => check_test(test)?,
-        Data::Book(book) => check_book(book)?,
+        Data::Book(book) => check_book(book, md5)?,
         Data::Doc(doc) => check_doc(doc)?,
     }
 
     Ok(())
 }
 
-fn check_book(book: &Book) -> anyhow::Result<()> {
+fn check_book(book: &Book, md5: &str) -> anyhow::Result<()> {
     let mut errors = Vec::new();
     if book.authors.len() == 0 {
         errors.push(anyhow::anyhow!("应当至少有一个作者"));
@@ -278,14 +278,14 @@ fn check_book(book: &Book) -> anyhow::Result<()> {
         }
     });
     for isbn in book.isbn.clone() {
-        if let Ok(isbn) = isbn.parse::<isbn::Isbn13>() {
-            let mut isbns_lock = ISBNS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
-            if isbns_lock.contains(&isbn) {
-                errors.push(anyhow::anyhow!("isbn重复: {}", isbn));
-            } else {
-                isbns_lock.push(isbn);
-            }
-        };
+        let isbn = isbn.parse::<isbn::Isbn13>().unwrap();
+
+        let mut isbns_lock = ISBNS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
+        if let Some((_, existing_md5)) = isbns_lock.iter().find(|(i, _)| i == &isbn) {
+            errors.push(anyhow::anyhow!("重复的isbn. md5: {} {}", md5, existing_md5));
+        } else {
+            isbns_lock.push((isbn, md5.to_string()));
+        }
     }
     if book.filetype != "pdf" {
         errors.push(anyhow::anyhow!("请检查filetype，只能为pdf"));
