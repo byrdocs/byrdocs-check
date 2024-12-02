@@ -152,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
 
+            let mut unmatched = false;
             for temp_file in &temp_files.files {
                 if temp_file.file_name.as_str() == format!("{}.pdf", metadata.id)
                     || temp_file.file_name.as_str() == format!("{}.zip", metadata.id)
@@ -172,13 +173,18 @@ async fn main() -> anyhow::Result<()> {
                             reader.read_to_end(&mut buffer).await?;
                             let md5 = md5::compute(&buffer);
                             if !(format!("{:x}", md5) == metadata.id) {
-                                println!("MD5 not match: {}", path.display());
+                                println!("MD5不匹配: {}", path.display());
+                                unmatched = true;
                             }
                         }
                     }
                     break;
                 }
             }
+            if unmatched {
+                continue;
+            }
+
             match metadata.data {
                 Data::Test(_) => {
                     success_test += 1;
