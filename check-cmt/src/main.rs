@@ -3,7 +3,7 @@ mod metadata;
 use pdfium_render::prelude::{PdfPageRenderRotation, PdfRenderConfig, Pdfium};
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
-use serde_json::json;
+use serde_json::{json, to_string_pretty};
 use std::{collections::HashSet, path::Path};
 use structopt::StructOpt;
 use tokio::fs::File;
@@ -422,22 +422,32 @@ async fn publish_files(
     }
     println!("Publishing files: {:#?}", ids);
     let backend_client = reqwest::Client::new();
-    backend_client
+    let res = backend_client
         .post(format!("{}/api/file/publish", backend_url))
         .bearer_auth(backend_token)
         .json(&json!({
             "ids": ids
         }))
         .send()
-        .await?;
+        .await?
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
 
-    temp_files
-        .files
-        .retain(|file| !publish_list.contains(&file.file_name[..32])); // Remove published files
+    if true == res["success"].as_bool().unwrap() {
+        temp_files
+            .files
+            .retain(|file| !publish_list.contains(&file.file_name[..32])); // Remove published files
 
-    //Publish files
-    println!("Files published");
-    Ok(())
+        println!("{} Files published", ids.len());
+        Ok(())
+    } else {
+        println!(
+            "Failed to publish files: {}",
+            to_string_pretty(&res).unwrap()
+        );
+        Err(anyhow::anyhow!("Failed to publish files"))
+    } //Publish files
 }
 
 async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
