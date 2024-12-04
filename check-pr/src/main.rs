@@ -118,72 +118,25 @@ async fn main() -> anyhow::Result<()> {
             let metadata: MetaData = match serde_yaml::from_reader(file) {
                 Ok(metadata) => metadata,
                 Err(e) => {
-                    eprintln!("{}, {:?}", path.display(), e);
+                    println!("{:?}:\n  格式错误: {:?}", path.file_name().unwrap(), e);
                     continue;
                 }
             };
 
-            if let Err(e) = check(&metadata.data, &metadata.id) {
-                eprintln!("{}, {:?}", path.display(), e);
+            if let Err(e) = check(
+                &metadata,
+                &metadata.id,
+                &s3_file_list,
+                &path,
+                &temp_files,
+                &input.bucket,
+                &s3_client,
+            )
+            .await
+            {
+                println!("{:?}:\n  {:?}", path.file_name().unwrap(), e);
                 continue;
             };
-
-            let url_regex =
-                regex::Regex::new(r"^https://byrdocs\.org/files/[a-fA-F0-9]{32}\.(pdf|zip)$")
-                    .unwrap();
-
-            if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
-                println!("Not found in S3: {}", path.display());
-                continue;
-            }
-
-            if !url_regex.is_match(&metadata.url) {
-                println!("请检查url是否填写正确: {}", path.display());
-                continue;
-            }
-
-            if !metadata.url.contains(metadata.id.as_str()) {
-                println!("请检查url中文件名与id是否匹配: {}", path.display());
-                continue;
-            }
-
-            if !(path.file_name().unwrap().to_str().unwrap() == format!("{}.yml", metadata.id)) {
-                println!("请检查文件名与id是否匹配: {}", path.display());
-                continue;
-            }
-
-            let mut unmatched = false;
-            for temp_file in &temp_files.files {
-                if temp_file.file_name.as_str() == format!("{}.pdf", metadata.id)
-                    || temp_file.file_name.as_str() == format!("{}.zip", metadata.id)
-                {
-                    match temp_file.status {
-                        Status::Published => {
-                            println!("Published: {}", path.display());
-                        }
-                        _ => {
-                            let request = rusoto_s3::GetObjectRequest {
-                                bucket: input.bucket.clone(),
-                                key: metadata.url[metadata.url.len() - 36..].to_string(),
-                                ..Default::default()
-                            };
-                            let file = s3_client.get_object(request).await?.body.unwrap();
-                            let mut reader = BufReader::new(file.into_async_read());
-                            let mut buffer = Vec::new();
-                            reader.read_to_end(&mut buffer).await?;
-                            let md5 = md5::compute(&buffer);
-                            if !(format!("{:x}", md5) == metadata.id) {
-                                println!("MD5不匹配: {}", path.display());
-                                unmatched = true;
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-            if unmatched {
-                continue;
-            }
 
             match metadata.data {
                 Data::Test(_) => {
@@ -207,7 +160,11 @@ async fn main() -> anyhow::Result<()> {
         success_doc
     );
     if total != success_book + success_test + success_doc {
-        return Err(anyhow::anyhow!("Some files are invalid"));
+        return Err(anyhow::anyhow!(
+            "自动检查不通过，请按照上述报错信息修改您的元信息"
+        ));
+    } else {
+        println!("自动检查通过，我们正在审核您的文件，请耐心等待");
     }
     Ok(())
 }
@@ -257,14 +214,83 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 static ISBNS: OnceLock<Mutex<Vec<(isbn::Isbn13, String)>>> = OnceLock::new();
 
-fn check(data: &Data, md5: &str) -> anyhow::Result<()> {
-    match data {
-        Data::Test(test) => check_test(test)?,
-        Data::Book(book) => check_book(book, md5)?,
-        Data::Doc(doc) => check_doc(doc)?,
+async fn check(
+    metadata: &MetaData,
+    md5: &str,
+    s3_file_list: &Vec<String>,
+    path: &Path,
+    temp_files: &ApiResult,
+    bucket: &str,
+    s3_client: &rusoto_s3::S3Client,
+) -> anyhow::Result<()> {
+    let mut errors = Vec::new();
+
+    let data = &metadata.data;
+    if let Err(e) = match data {
+        Data::Test(test) => check_test(test),
+        Data::Book(book) => check_book(book, md5),
+        Data::Doc(doc) => check_doc(doc),
+    } {
+        errors.push(e);
     }
 
-    Ok(())
+    let url_regex =
+        regex::Regex::new(r"^https://byrdocs\.org/files/[a-fA-F0-9]{32}\.(pdf|zip)$").unwrap();
+
+    if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
+        errors.push(anyhow::anyhow!("请检查文件是否上传"));
+    }
+
+    if !url_regex.is_match(&metadata.url) {
+        errors.push(anyhow::anyhow!("请检查url是否填写正确"));
+    }
+
+    if !metadata.url.contains(metadata.id.as_str()) {
+        errors.push(anyhow::anyhow!("请检查url中文件名与id是否匹配"));
+    }
+
+    if !(path.file_name().unwrap().to_str().unwrap() == format!("{}.yml", metadata.id)) {
+        errors.push(anyhow::anyhow!("请检查文件名是否与id匹配"));
+    }
+
+    let mut unmatched = false;
+    for temp_file in &temp_files.files {
+        if temp_file.file_name.as_str() == format!("{}.pdf", metadata.id)
+            || temp_file.file_name.as_str() == format!("{}.zip", metadata.id)
+        {
+            match temp_file.status {
+                Status::Published => {
+                    // println!("Published: {}", path.display());
+                }
+                _ => {
+                    let request = rusoto_s3::GetObjectRequest {
+                        bucket: bucket.to_string(),
+                        key: metadata.url[metadata.url.len() - 36..].to_string(),
+                        ..Default::default()
+                    };
+                    let file = s3_client.get_object(request).await?.body.unwrap();
+                    let mut reader = BufReader::new(file.into_async_read());
+                    let mut buffer = Vec::new();
+                    reader.read_to_end(&mut buffer).await?;
+                    let md5 = md5::compute(&buffer);
+                    if !(format!("{:x}", md5) == metadata.id) {
+                        unmatched = true;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    if unmatched {
+        errors.push(anyhow::anyhow!("md5不匹配"));
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        Err(anyhow::anyhow!(error_messages.join("\n")))
+    }
 }
 
 fn check_book(book: &Book, md5: &str) -> anyhow::Result<()> {
@@ -300,7 +326,7 @@ fn check_book(book: &Book, md5: &str) -> anyhow::Result<()> {
         Ok(())
     } else {
         let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-        Err(anyhow::anyhow!(error_messages.join(", ")))
+        Err(anyhow::anyhow!(error_messages.join("\n")))
     }
 }
 
@@ -356,7 +382,7 @@ fn check_test(test: &Test) -> anyhow::Result<()> {
         Ok(())
     } else {
         let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-        Err(anyhow::anyhow!(error_messages.join(", ")))
+        Err(anyhow::anyhow!(error_messages.join("\n")))
     }
 }
 
@@ -396,7 +422,7 @@ fn check_doc(doc: &Doc) -> anyhow::Result<()> {
         Ok(())
     } else {
         let error_messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-        Err(anyhow::anyhow!(error_messages.join(", ")))
+        Err(anyhow::anyhow!(error_messages.join("\n")))
     }
 }
 
