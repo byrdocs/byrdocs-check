@@ -466,6 +466,17 @@ async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
             if let Data::Book(ref mut book) = metadata.data {
                 let key = format!("{}.pdf", metadata.id);
                 let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
+                book.isbn = book
+                    .isbn
+                    .iter()
+                    .map(|isbn| {
+                        isbn.parse::<isbn::Isbn13>()
+                            .unwrap()
+                            .hyphenate()
+                            .unwrap()
+                            .to_string()
+                    })
+                    .collect();
                 if let Some(file) = file {
                     book.filesize = Some(file.size.unwrap() as u64);
                 }

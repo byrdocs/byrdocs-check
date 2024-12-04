@@ -440,5 +440,18 @@ mod test {
             isbn.parse::<isbn::Isbn13>(),
             Ok(isbn::Isbn13::new([9, 7, 8, 7, 1, 1, 1, 4, 0, 7, 7, 2, 0]).unwrap())
         );
+        let isbn = "9787111407720";
+        assert_eq!(
+            isbn.parse::<isbn::Isbn13>(),
+            Ok(isbn::Isbn13::new([9, 7, 8, 7, 1, 1, 1, 4, 0, 7, 7, 2, 0]).unwrap())
+        );
+        assert_eq!(
+            "978-7-111-40772-0",
+            isbn.parse::<isbn::Isbn13>()
+                .unwrap()
+                .hyphenate()
+                .unwrap()
+                .as_str()
+        );
     }
 }
