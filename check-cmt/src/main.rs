@@ -243,9 +243,16 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
             println!("Processing pdf: {:?}", path.to_string_lossy().as_ref());
             let mut reader = BufReader::new(File::open(&path).await?);
-            let mut buffer = Vec::new();
-            reader.read_to_end(&mut buffer).await?;
-            let md5 = md5::compute(&buffer);
+            let mut context = md5::Context::new();
+            let mut buffer = [0; 8192];
+            loop {
+                let bytes_read = reader.read(&mut buffer).await?;
+                if bytes_read == 0 {
+                    break;
+                }
+                context.consume(&buffer[..bytes_read]);
+            }
+            let md5 = context.compute();
             if !(format!("{:x}", md5) == path.file_stem().unwrap().to_str().unwrap()) {
                 println!("MD5 mismatch: {:x}", md5);
                 error_count += 1;

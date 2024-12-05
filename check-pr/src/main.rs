@@ -270,9 +270,16 @@ async fn check(
                     };
                     let file = s3_client.get_object(request).await?.body.unwrap();
                     let mut reader = BufReader::new(file.into_async_read());
-                    let mut buffer = Vec::new();
-                    reader.read_to_end(&mut buffer).await?;
-                    let md5 = md5::compute(&buffer);
+                    let mut context = md5::Context::new();
+                    let mut buffer = [0; 8192];
+                    loop {
+                        let bytes_read = reader.read(&mut buffer).await?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        context.consume(&buffer[..bytes_read]);
+                    }
+                    let md5 = context.compute();
                     if !(format!("{:x}", md5) == metadata.id) {
                         unmatched = true;
                     }
