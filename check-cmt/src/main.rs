@@ -242,29 +242,32 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
         let path = file.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
             println!("Processing pdf: {:?}", path.to_string_lossy().as_ref());
-            if let Ok(document) = pdfium.load_pdf_from_file(path.to_str().unwrap(), None) {
-                let render_config = PdfRenderConfig::new()
-                    .set_target_width(2000)
-                    .set_maximum_height(2000)
-                    .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
-                let document = document
-                    .pages()
-                    .get(0)
-                    .unwrap()
-                    .render_with_config(&render_config)?
-                    .as_image()
-                    .into_rgb8();
-                document.save_with_format(
-                    format!(
-                        "./tmp2/{}.jpg",
-                        &path.file_name().unwrap().to_str().unwrap()[..32]
-                    ),
-                    image::ImageFormat::Jpeg,
-                )?;
-            } else {
-                println!("Failed to load pdf: {:?}", path.to_string_lossy().as_ref());
-                error_count += 1;
-            };
+            match pdfium.load_pdf_from_file(path.to_str().unwrap(), None) {
+                Ok(document) => {
+                    let render_config = PdfRenderConfig::new()
+                        .set_target_width(2000)
+                        .set_maximum_height(2000)
+                        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+                    let document = document
+                        .pages()
+                        .get(0)
+                        .unwrap()
+                        .render_with_config(&render_config)?
+                        .as_image()
+                        .into_rgb8();
+                    document.save_with_format(
+                        format!(
+                            "./tmp2/{}.jpg",
+                            &path.file_name().unwrap().to_str().unwrap()[..32]
+                        ),
+                        image::ImageFormat::Jpeg,
+                    )?;
+                }
+                Err(e) => {
+                    println!("Failed to load pdf: {:?}", e);
+                    error_count += 1;
+                }
+            }
         }
     } //Generate jpg files
 
