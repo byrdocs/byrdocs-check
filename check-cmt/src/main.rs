@@ -242,6 +242,15 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
         let path = file.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
             println!("Processing pdf: {:?}", path.to_string_lossy().as_ref());
+            let mut reader = BufReader::new(File::open(&path).await?);
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer).await?;
+            let md5 = md5::compute(&buffer);
+            if !(format!("{:x}", md5) == path.file_stem().unwrap().to_str().unwrap()) {
+                println!("MD5 mismatch: {:x}", md5);
+                error_count += 1;
+                continue;
+            }
             match pdfium.load_pdf_from_file(path.to_str().unwrap(), None) {
                 Ok(document) => {
                     let render_config = PdfRenderConfig::new()
