@@ -105,13 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
     let mut temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
 
-    publish_files(
-        input.backend_url,
-        input.backend_token,
-        &input.dir,
-        &mut temp_files,
-    )
-    .await?; // publish files and remove published files from temp_files
+    let publish_list = get_publish_list(&input.dir, &mut temp_files).await?; // get publish list and remove published files from temp_files
 
     //image part
 
@@ -129,6 +123,14 @@ async fn main() -> anyhow::Result<()> {
     upload_files(&s3_client, input.bucket).await?;
 
     //image part over
+
+    publish_files(
+        publish_list,
+        input.backend_url,
+        input.backend_token,
+        &mut temp_files,
+    )
+    .await?; // publish files
 
     merge_json(&input.dir, &s3_obj).await?;
 
@@ -402,12 +404,10 @@ async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Resul
     Ok(temp_files)
 }
 
-async fn publish_files(
-    backend_url: String,
-    backend_token: String,
+async fn get_publish_list(
     dir: &str,
     temp_files: &mut ApiResult,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<HashSet<String>> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
     for file in path.read_dir()? {
@@ -433,6 +433,19 @@ async fn publish_files(
         .intersection(&temp_filename)
         .cloned()
         .collect::<HashSet<_>>();
+    temp_files
+        .files
+        .retain(|file| !publish_list.contains(&file.file_name[..32])); // Remove published files
+
+    Ok(publish_list)
+}
+
+async fn publish_files(
+    publish_list: HashSet<String>,
+    backend_url: String,
+    backend_token: String,
+    temp_files: &mut ApiResult,
+) -> anyhow::Result<()> {
     let mut ids = Vec::new();
     for file in &temp_files.files {
         if publish_list.contains(&file.file_name[..32]) {
@@ -454,10 +467,6 @@ async fn publish_files(
         .unwrap();
 
     if true == res["success"].as_bool().unwrap() {
-        temp_files
-            .files
-            .retain(|file| !publish_list.contains(&file.file_name[..32])); // Remove published files
-
         println!("{} Files published", ids.len());
         Ok(())
     } else {
