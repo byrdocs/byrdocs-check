@@ -113,6 +113,8 @@ async fn main() -> anyhow::Result<()> {
         if !file_name.to_str().unwrap().ends_with(".yml") {
             if file_name.to_str().unwrap().ends_with(".yaml") {
                 println!("{:?}:\n  请将.yml改为.yaml", file_name);
+            } else {
+                println!("{:?}:\n  请检查文件名后缀, 只能为\".yml\"", file_name);
             }
             continue;
         }
