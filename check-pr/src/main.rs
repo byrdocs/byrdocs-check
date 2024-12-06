@@ -109,7 +109,11 @@ async fn main() -> anyhow::Result<()> {
     for entry in dir_path.read_dir()? {
         total += 1;
         let entry = entry?;
-        if !entry.file_name().to_str().unwrap().ends_with(".yml") {
+        let file_name = entry.file_name();
+        if !file_name.to_str().unwrap().ends_with(".yml") {
+            if file_name.to_str().unwrap().ends_with(".yaml") {
+                println!("{:?}:\n  请将.yml改为.yaml", file_name);
+            }
             continue;
         }
         let path = entry.path();
@@ -198,11 +202,11 @@ async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Ve
                 }
             }
             Err(rusoto_core::RusotoError::Unknown(resp)) => {
-                eprintln!("Error: {}", resp.status);
+                println!("Error: {}", resp.status);
                 break;
             }
             Err(e) => {
-                eprintln!("Error: {:?}", e);
+                println!("Error: {:?}", e);
                 break;
             }
         }
