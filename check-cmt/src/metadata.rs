@@ -39,7 +39,7 @@ pub struct Test {
     pub time: Time,
     pub filetype: String,
     pub content: Vec<String>,
-    pub filesize: Option<u64>,
+    pub filesize: Option<i64>,
 }
 
 #[derive(serde::Deserialize, Debug, Serialize, Clone)]
@@ -79,7 +79,7 @@ pub struct Book {
     pub publisher: Option<String>,
     pub isbn: Vec<String>,
     pub filetype: String,
-    pub filesize: Option<u64>,
+    pub filesize: Option<i64>,
 }
 
 #[derive(serde::Deserialize, Debug, Serialize, Clone)]
@@ -90,7 +90,7 @@ pub struct Doc {
     pub filetype: String,
     pub course: Vec<Course>,
     pub content: Vec<String>,
-    pub filesize: Option<u64>,
+    pub filesize: Option<i64>,
 }
 
 impl<'de> Deserialize<'de> for MetaData {

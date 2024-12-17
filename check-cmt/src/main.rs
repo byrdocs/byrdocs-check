@@ -491,38 +491,26 @@ async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
             reader.read_to_end(&mut buf).await?;
             let mut metadata: MetaData = serde_yaml::from_slice(&buf)?;
 
-            if let Data::Book(ref mut book) = metadata.data {
-                let key = format!("{}.pdf", metadata.id);
-                let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
-                book.isbn = book
-                    .isbn
-                    .iter()
-                    .map(|isbn| {
-                        isbn.parse::<isbn::Isbn13>()
-                            .unwrap()
-                            .hyphenate()
-                            .unwrap()
-                            .to_string()
-                    })
-                    .collect();
-                if let Some(file) = file {
-                    book.filesize = Some(file.size.unwrap() as u64);
+            match metadata.data {
+                Data::Book(ref mut book) => {
+                    book.filesize = get_file_size(&metadata.id, s3_obj);
+                    book.isbn = book
+                        .isbn
+                        .iter()
+                        .map(|isbn| {
+                            isbn.parse::<isbn::Isbn13>()
+                                .unwrap()
+                                .hyphenate()
+                                .unwrap()
+                                .to_string()
+                        })
+                        .collect();
                 }
-            }
-
-            if let Data::Doc(ref mut doc) = metadata.data {
-                let key = format!("{}.pdf", metadata.id);
-                let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
-                if let Some(file) = file {
-                    doc.filesize = Some(file.size.unwrap() as u64);
+                Data::Doc(ref mut doc) => {
+                    doc.filesize = get_file_size(&metadata.id, s3_obj);
                 }
-            }
-
-            if let Data::Test(ref mut test) = metadata.data {
-                let key = format!("{}.pdf", metadata.id);
-                let file = s3_obj.iter().find(|file| file.key.clone().unwrap() == key);
-                if let Some(file) = file {
-                    test.filesize = Some(file.size.unwrap() as u64);
+                Data::Test(ref mut test) => {
+                    test.filesize = get_file_size(&metadata.id, s3_obj);
                 }
             }
 
@@ -536,6 +524,15 @@ async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
     println!("Metadata JSON written to: {:?}", temp_file_path);
     //merge to json
     Ok(())
+}
+
+fn get_file_size(id: &str, s3_obj: &[Object]) -> Option<i64> {
+    s3_obj
+        .iter()
+        .find(|file| {
+            file.key == Some(format!("{}.pdf", id)) || file.key == Some(format!("{}.zip", id))
+        })
+        .and_then(|file| file.size)
 }
 
 async fn upload_metadata(
