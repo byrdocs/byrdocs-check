@@ -103,18 +103,18 @@ async fn main() -> anyhow::Result<()> {
     let s3_client =
         get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
-    let mut temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
+    let mut api_result = get_temp_files(&input.backend_url, &input.backend_token).await?;
 
-    let ids = get_publish_ids(&input.dir, &mut temp_files).await?; // get publish list and remove published files from temp_files
+    let ids = get_publish_ids(&input.dir, &mut api_result).await?; // get publish list and remove published files from temp_files
 
     //image part
 
-    let files_need_update = get_files_need_update(&s3_obj, &temp_files).await?;
+    let nocover_files = get_nocover_files(&s3_obj, &api_result).await?;
 
     std::fs::create_dir_all("./tmp1")?;
     std::fs::create_dir_all("./tmp2")?;
     std::fs::create_dir_all("./tmp3")?;
-    download_files(&s3_client, &s3_obj, files_need_update, input.bucket.clone()).await?;
+    download_files(&s3_client, &s3_obj, nocover_files, input.bucket.clone()).await?;
 
     generate_jpg_files().await?;
 
@@ -158,7 +158,7 @@ async fn get_s3_client(
     Ok(s3_client)
 }
 
-async fn get_files_need_update(
+async fn get_nocover_files(
     s3_obj: &Vec<Object>,
     temp_files: &ApiResult,
 ) -> anyhow::Result<HashSet<String>> {
@@ -398,7 +398,7 @@ async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Resul
     Ok(temp_files)
 }
 
-async fn get_publish_ids(dir: &str, temp_files: &mut ApiResult) -> anyhow::Result<HashSet<u64>> {
+async fn get_publish_ids(dir: &str, api_result: &mut ApiResult) -> anyhow::Result<HashSet<u64>> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
     for file in path.read_dir()? {
@@ -415,7 +415,7 @@ async fn get_publish_ids(dir: &str, temp_files: &mut ApiResult) -> anyhow::Resul
         }
     }
 
-    let temp_filename = temp_files
+    let temp_filename = api_result
         .files
         .iter()
         .map(|file| file.file_name[..32].to_string())
@@ -424,13 +424,13 @@ async fn get_publish_ids(dir: &str, temp_files: &mut ApiResult) -> anyhow::Resul
         .intersection(&temp_filename)
         .cloned()
         .collect::<HashSet<_>>();
-    let ids = temp_files
+    let ids = api_result
         .files
         .iter()
         .filter(|file| publish_list.contains(&file.file_name[..32]))
         .map(|file| file.id)
         .collect::<HashSet<_>>();
-    temp_files
+    api_result
         .files
         .retain(|file| !publish_list.contains(&file.file_name[..32]));
 
