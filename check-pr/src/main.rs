@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     let s3_file_list = list_all_objects(&s3_client, &input.bucket).await;
 
     let backend_client = reqwest::Client::new();
-    let temp_files = backend_client
+    let api_result = backend_client
         .get(format!("{}/api/file/notPublished", input.backend_url))
         .bearer_auth(input.backend_token)
         .send()
@@ -134,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
                 &metadata.id,
                 &s3_file_list,
                 &path,
-                &temp_files,
+                &api_result,
                 &input.bucket,
                 &s3_client,
             )
@@ -225,7 +225,7 @@ async fn check(
     md5: &str,
     s3_file_list: &Vec<String>,
     path: &Path,
-    temp_files: &ApiResult,
+    api_result: &ApiResult,
     bucket: &str,
     s3_client: &rusoto_s3::S3Client,
 ) -> anyhow::Result<()> {
@@ -260,13 +260,19 @@ async fn check(
     }
 
     let mut unmatched = false;
-    for temp_file in &temp_files.files {
+    for temp_file in &api_result.files {
         if temp_file.file_name.as_str() == format!("{}.pdf", metadata.id)
             || temp_file.file_name.as_str() == format!("{}.zip", metadata.id)
         {
             match temp_file.status {
-                Status::Published => {
-                    // println!("Published: {}", path.display());
+                Status::Expired => {
+                    errors.push(anyhow::anyhow!("文件已过期，请重新上传"));
+                }
+                Status::Timeout | Status::Pending => {
+                    errors.push(anyhow::anyhow!("文件未上传成功，请重新上传"));
+                }
+                Status::Error => {
+                    errors.push(anyhow::anyhow!("api 未知错误"));
                 }
                 _ => {
                     let request = rusoto_s3::GetObjectRequest {
