@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
     let mut temp_files = get_temp_files(&input.backend_url, &input.backend_token).await?;
 
-    let publish_list = get_publish_list(&input.dir, &mut temp_files).await?; // get publish list and remove published files from temp_files
+    let ids = get_publish_ids(&input.dir, &mut temp_files).await?; // get publish list and remove published files from temp_files
 
     //image part
 
@@ -124,13 +124,7 @@ async fn main() -> anyhow::Result<()> {
 
     //image part over
 
-    publish_files(
-        publish_list,
-        input.backend_url,
-        input.backend_token,
-        &mut temp_files,
-    )
-    .await?; // publish files
+    publish_files(ids, input.backend_url, input.backend_token).await?; // publish files
 
     merge_json(&input.dir, &s3_obj).await?;
 
@@ -404,10 +398,7 @@ async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Resul
     Ok(temp_files)
 }
 
-async fn get_publish_list(
-    dir: &str,
-    temp_files: &mut ApiResult,
-) -> anyhow::Result<HashSet<String>> {
+async fn get_publish_ids(dir: &str, temp_files: &mut ApiResult) -> anyhow::Result<HashSet<u64>> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
     for file in path.read_dir()? {
@@ -433,25 +424,24 @@ async fn get_publish_list(
         .intersection(&temp_filename)
         .cloned()
         .collect::<HashSet<_>>();
+    let ids = temp_files
+        .files
+        .iter()
+        .filter(|file| publish_list.contains(&file.file_name[..32]))
+        .map(|file| file.id)
+        .collect::<HashSet<_>>();
     temp_files
         .files
-        .retain(|file| !publish_list.contains(&file.file_name[..32])); // Remove published files
+        .retain(|file| !publish_list.contains(&file.file_name[..32]));
 
-    Ok(publish_list)
+    Ok(ids)
 }
 
 async fn publish_files(
-    publish_list: HashSet<String>,
+    ids: HashSet<u64>,
     backend_url: String,
     backend_token: String,
-    temp_files: &mut ApiResult,
 ) -> anyhow::Result<()> {
-    let mut ids = Vec::new();
-    for file in &temp_files.files {
-        if publish_list.contains(&file.file_name[..32]) {
-            ids.push(file.id);
-        }
-    }
     println!("Publishing files: {:#?}", ids);
     let backend_client = reqwest::Client::new();
     let res = backend_client
