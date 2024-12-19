@@ -325,7 +325,7 @@ async fn generate_webp_files() -> anyhow::Result<()> {
             file.write_all(&webp_data).await?;
             count += 1;
         }
-    } //Generate jpg files
+    } //Generate webp files
     println!("{} webp Files generated", count);
     Ok(())
 }
