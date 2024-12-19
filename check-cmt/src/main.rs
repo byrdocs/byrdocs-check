@@ -116,9 +116,9 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all("./tmp3")?;
     download_files(&s3_client, &s3_obj, nocover_files, input.bucket.clone()).await?;
 
-    generate_jpg_files().await?;
+    generate_images().await?;
 
-    generate_webp_files().await?;
+    reduce_webp_size().await?;
 
     upload_files(&s3_client, input.bucket).await?;
 
@@ -162,6 +162,7 @@ async fn get_nocover_files(
     s3_obj: &Vec<Object>,
     temp_files: &ApiResult,
 ) -> anyhow::Result<HashSet<String>> {
+    println!("Getting files need to generate cover");
     let mut jpg_files = HashSet::new();
     let mut webp_files = HashSet::new();
     for item in s3_obj {
@@ -190,10 +191,13 @@ async fn get_nocover_files(
         .difference(&webp_files)
         .cloned()
         .collect::<HashSet<_>>();
-    let files_need_update = jpg_diff.union(&webp_diff).cloned().collect::<HashSet<_>>();
-    //Get files need to update
-    println!("Files need to update: {:#?}", files_need_update);
-    Ok(files_need_update)
+    let files_need_generate_cover = jpg_diff.union(&webp_diff).cloned().collect::<HashSet<_>>();
+    //Get files need to generate cover
+    println!(
+        "Files need to generate cover: {:#?}",
+        files_need_generate_cover
+    );
+    Ok(files_need_generate_cover)
 }
 
 async fn download_files(
@@ -202,6 +206,7 @@ async fn download_files(
     files_need_update: HashSet<String>,
     bucket: String,
 ) -> anyhow::Result<()> {
+    println!("Downloading files");
     std::fs::create_dir_all("./tmp1")?;
     let dir = Path::new("./tmp1");
     for file in s3_obj {
@@ -226,7 +231,8 @@ async fn download_files(
     Ok(())
 }
 
-async fn generate_jpg_files() -> anyhow::Result<()> {
+async fn generate_images() -> anyhow::Result<()> {
+    println!("Generating images");
     let dir = Path::new("./tmp1");
     let pdfium = Pdfium::new(
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
@@ -253,26 +259,33 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
                 println!("MD5 mismatch: {:x}", md5);
                 error_count += 1;
                 continue;
-            }
+            } // Additional check for md5 mismatch
             match pdfium.load_pdf_from_file(path.to_str().unwrap(), None) {
                 Ok(document) => {
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(2000)
                         .set_maximum_height(2000)
                         .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
-                    let document = document
+                    let document_image = document
                         .pages()
                         .get(0)
                         .unwrap()
                         .render_with_config(&render_config)?
                         .as_image()
                         .into_rgb8();
-                    document.save_with_format(
+                    document_image.save_with_format(
                         format!(
                             "./tmp2/{}.jpg",
                             &path.file_name().unwrap().to_str().unwrap()[..32]
                         ),
                         image::ImageFormat::Jpeg,
+                    )?;
+                    document_image.save_with_format(
+                        format!(
+                            "./tmp3/{}.webp",
+                            &path.file_name().unwrap().to_str().unwrap()[..32]
+                        ),
+                        image::ImageFormat::WebP,
                     )?;
                 }
                 Err(e) => {
@@ -281,7 +294,7 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
                 }
             }
         }
-    } //Generate jpg files
+    } //Generate images
 
     if error_count > 0 {
         return Err(anyhow::anyhow!("Failed to load {} pdf files", error_count));
@@ -291,32 +304,29 @@ async fn generate_jpg_files() -> anyhow::Result<()> {
         "{} jpg Files generated",
         Path::new("./tmp2").read_dir()?.count()
     );
+    println!(
+        "{} webp Files generated",
+        Path::new("./tmp3").read_dir()?.count()
+    );
+
     Ok(())
 }
 
-async fn generate_webp_files() -> anyhow::Result<()> {
-    let dir = Path::new("./tmp2");
+async fn reduce_webp_size() -> anyhow::Result<()> {
+    println!("Reducing webp file size");
+    let dir = Path::new("./tmp3");
     let mut count = 0;
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("jpg") {
-            let img = image::open(&path)?.to_rgb8();
-            let dynamic_img = image::DynamicImage::ImageRgb8(img);
-            let encoder = Encoder::from_image(&dynamic_img).unwrap();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("webp") {
+            let img = image::open(&path)?;
+            let encoder = Encoder::from_image(&img).unwrap();
             let mut webp_data = encoder.encode(100.0);
-            if webp_data.len() <= 50 * 1024 {
-                let file_path = Path::new("./tmp3").join(format!(
-                    "{}.webp",
-                    path.file_stem().unwrap().to_str().unwrap()
-                ));
-                let mut file = File::create(file_path).await?;
-                file.write_all(&webp_data).await?;
-                return Ok(());
-            }
-            let quality = ((48.0 * 1024.0 / webp_data.len() as f32) * 100.0) as i32;
-            webp_data = encoder.encode(std::cmp::max(quality, 5) as f32);
-
+            if webp_data.len() > 50 * 1024 {
+                let quality = ((48.0 * 1024.0 / webp_data.len() as f32) * 100.0) as i32;
+                webp_data = encoder.encode(std::cmp::max(quality, 5) as f32)
+            };
             let file_path = Path::new("./tmp3").join(format!(
                 "{}.webp",
                 path.file_stem().unwrap().to_str().unwrap()
@@ -325,8 +335,8 @@ async fn generate_webp_files() -> anyhow::Result<()> {
             file.write_all(&webp_data).await?;
             count += 1;
         }
-    } //Generate webp files
-    println!("{} webp Files generated", count);
+    } //Reduce webp size
+    println!("{} webp file size reduced", count);
     Ok(())
 }
 
@@ -532,6 +542,7 @@ async fn upload_metadata(
     r2_bucket: String,
     dir: &String,
 ) -> anyhow::Result<()> {
+    println!("Uploading metadata to R2");
     let r2_client = get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key).await?;
     let metadata_json = File::open(Path::new(&dir).join("metadata2.json")).await?;
     let mut reader = BufReader::new(metadata_json);
