@@ -1,6 +1,6 @@
 mod metadata;
 
-use pdfium_render::prelude::{PdfPageRenderRotation, PdfRenderConfig, Pdfium};
+use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
 use serde_json::{json, to_string_pretty};
@@ -264,15 +264,13 @@ async fn generate_images() -> anyhow::Result<()> {
                 Ok(document) => {
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(2000)
-                        .set_maximum_height(2000)
-                        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+                        .set_maximum_height(2000);
                     let document_image = document
                         .pages()
                         .get(0)
                         .unwrap()
                         .render_with_config(&render_config)?
-                        .as_image()
-                        .into_rgb8();
+                        .as_image();
                     document_image.save_with_format(
                         format!(
                             "./tmp2/{}.jpg",
