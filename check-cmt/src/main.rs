@@ -271,7 +271,7 @@ async fn generate_images() -> anyhow::Result<()> {
                         .unwrap()
                         .render_with_config(&render_config)?
                         .as_image();
-                    document_image.save_with_format(
+                    document_image.to_rgb8().save_with_format(
                         format!(
                             "./tmp2/{}.jpg",
                             &path.file_name().unwrap().to_str().unwrap()[..32]
