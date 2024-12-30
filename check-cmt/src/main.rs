@@ -554,7 +554,7 @@ async fn upload_metadata(
         ..Default::default()
     };
     r2_client.put_object(request).await?;
-    println!("Uploading metadata to R2");
+    println!("Metadata uploaded");
     Ok(())
 }
 
