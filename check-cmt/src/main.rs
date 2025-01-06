@@ -339,9 +339,10 @@ async fn reduce_webp_size() -> anyhow::Result<()> {
 }
 
 async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()> {
-    let dir = Path::new("./tmp2");
-    println!("Uploading jpg files: {:#?}", dir.read_dir()?.count());
-    for file in dir.read_dir()? {
+    let jpg_dir = Path::new("./tmp2");
+    println!("Uploading jpg files: {:#?}", jpg_dir.read_dir()?.count());
+    let mut jpg_success = 0;
+    for file in jpg_dir.read_dir()? {
         let file = file?;
         let path = file.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("jpg") {
@@ -349,24 +350,43 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
             let mut reader = BufReader::new(file);
             let mut buf = Vec::new();
             reader.read_to_end(&mut buf).await?;
-            let request = rusoto_s3::PutObjectRequest {
-                bucket: bucket.clone(),
-                key: path
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .as_ref()
-                    .to_string(),
-                body: Some(buf.into()),
-                content_type: Some("image/jpeg".to_string()),
-                ..Default::default()
-            };
-            s3_client.put_object(request).await?;
+            let file_name = path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+                .to_string();
+            let mut retry = 3;
+            while let Err(e) = s3_client
+                .put_object(rusoto_s3::PutObjectRequest {
+                    bucket: bucket.clone(),
+                    key: file_name.clone(),
+                    body: Some(buf.clone().into()),
+                    content_type: Some("image/jpeg".to_string()),
+                    ..Default::default()
+                })
+                .await
+            {
+                retry -= 1;
+                if retry <= 0 {
+                    break;
+                }
+                println!("{file_name}: 上传失败: {e}，剩余重试次数: {retry}")
+            }
+            if retry <= 0 {
+                println!("{file_name}: 上传失败！跳过此文件")
+            } else {
+                println!("{file_name}: 上传成功!");
+                jpg_success += 1;
+            }
         }
     }
-    let dir = Path::new("./tmp3");
-    println!("Uploading webp files: {:#?}", dir.read_dir()?.count());
-    for file in dir.read_dir()? {
+    let jpg_failed = jpg_dir.read_dir()?.count() - jpg_success;
+    println!("Jpg files uploaded, success: {jpg_success}, failed: {jpg_failed}",);
+    let webp_dir = Path::new("./tmp3");
+    println!("Uploading webp files: {:#?}", webp_dir.read_dir()?.count());
+    let mut webp_success = 0;
+    for file in webp_dir.read_dir()? {
         let file = file?;
         let path = file.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("webp") {
@@ -374,24 +394,51 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
             let mut reader = BufReader::new(file);
             let mut buf = Vec::new();
             reader.read_to_end(&mut buf).await?;
-            let request = rusoto_s3::PutObjectRequest {
-                bucket: bucket.clone(),
-                key: path
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .as_ref()
-                    .to_string(),
-                body: Some(buf.into()),
-                content_type: Some("image/webp".to_string()),
-                ..Default::default()
-            };
-            s3_client.put_object(request).await?;
+            let file_name = path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+                .to_string();
+            let mut retry = 3;
+            while let Err(e) = s3_client
+                .put_object(rusoto_s3::PutObjectRequest {
+                    bucket: bucket.clone(),
+                    key: path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .as_ref()
+                        .to_string(),
+                    body: Some(buf.clone().into()),
+                    content_type: Some("image/webp".to_string()),
+                    ..Default::default()
+                })
+                .await
+            {
+                retry -= 1;
+                if retry <= 0 {
+                    break;
+                }
+                println!("{file_name}: 上传失败: {e}，剩余重试次数: {retry}")
+            }
+            if retry <= 0 {
+                println!("{file_name}: 上传失败！跳过此文件")
+            } else {
+                println!("{file_name}: 上传成功!");
+                webp_success += 1;
+            }
         }
     }
-    //Upload files
+    let webp_failed = webp_dir.read_dir()?.count() - webp_success;
+    println!("WebP files uploaded, success: {webp_success}, failed: {webp_failed}");
     println!("Files uploaded");
-    Ok(())
+    if !jpg_failed == 0 || !webp_failed == 0 {
+        Err(anyhow::anyhow!("Upload files failed"))
+    } else {
+        Ok(())
+    }
+    //Upload files
 }
 
 async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Result<ApiResult> {
