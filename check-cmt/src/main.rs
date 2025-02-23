@@ -3,6 +3,7 @@ mod metadata;
 use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3Client, S3};
+use serde::Serialize;
 use serde_json::{json, to_string_pretty};
 use std::{collections::HashSet, path::Path};
 use structopt::StructOpt;
@@ -12,6 +13,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
 };
 use webp::Encoder;
+use zip::ZipArchive;
 
 use metadata::*;
 
@@ -89,6 +91,8 @@ struct Input {
     r2_secret_access_key: String,
     #[structopt(long = "r2_bucket", help = "R2 bucket", required = true)]
     r2_bucket: String,
+    #[structopt(long = "filelist_url", help = "Filelist URL", required = true)]
+    filelist_url: String,
 }
 
 #[tokio::main]
@@ -116,7 +120,9 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all("./tmp3")?;
     download_files(&s3_client, &s3_obj, nocover_files, input.bucket.clone()).await?;
 
-    generate_images().await?;
+    generate_pdf_covers().await?;
+
+    generate_zip_preview(&input.filelist_url).await?;
 
     reduce_webp_size().await?;
 
@@ -178,7 +184,7 @@ async fn get_nocover_files(
     let mut raw_files = HashSet::new();
     for item in s3_obj {
         let key = item.key.clone().unwrap_or_default();
-        if key.ends_with(".pdf") && !temp_files.files.iter().any(|file| file.file_name == key) {
+        if !temp_files.files.iter().any(|file| file.file_name == key) {
             raw_files.insert(key[..32].to_string());
         }
     }
@@ -231,7 +237,7 @@ async fn download_files(
     Ok(())
 }
 
-async fn generate_images() -> anyhow::Result<()> {
+async fn generate_pdf_covers() -> anyhow::Result<()> {
     println!("Generating images");
     let dir = Path::new("./tmp1");
     let pdfium = Pdfium::new(
@@ -307,6 +313,125 @@ async fn generate_images() -> anyhow::Result<()> {
         Path::new("./tmp3").read_dir()?.count()
     );
 
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct FileNode {
+    #[serde(rename = "type")]
+    node_type: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<Vec<FileNode>>,
+}
+
+fn build_tree(zip_path: &str) -> Result<Vec<FileNode>, anyhow::Error> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut zip = ZipArchive::new(file)?;
+    let mut root_children: Vec<FileNode> = Vec::new();
+
+    for i in 0..zip.len() {
+        let entry = zip.by_index(i)?;
+        let is_dir = entry.is_dir();
+        let path = entry.name().trim_matches('/').to_string();
+        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        let mut current_children = &mut root_children;
+        for (index, part) in parts.iter().enumerate() {
+            let is_last = index == parts.len() - 1;
+            let node_type = if is_last && !is_dir { "file" } else { "folder" };
+
+            let pos = current_children.iter().position(|n| n.name == *part);
+            if let Some(pos) = pos {
+                let node = &mut current_children[pos];
+                if node.node_type != node_type {
+                    return Err(anyhow::anyhow!(
+                        "Conflict: {} is both {} and {}",
+                        part,
+                        node.node_type,
+                        node_type
+                    ));
+                }
+                if node_type == "folder" {
+                    current_children = node.children.as_mut().unwrap();
+                } else {
+                    break;
+                }
+            } else {
+                let new_node = FileNode {
+                    node_type: node_type.to_string(),
+                    name: part.to_string(),
+                    children: if node_type == "folder" {
+                        Some(Vec::new())
+                    } else {
+                        None
+                    },
+                };
+                current_children.push(new_node);
+                if node_type == "folder" {
+                    let last_index = current_children.len() - 1;
+                    current_children = current_children[last_index].children.as_mut().unwrap();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(root_children)
+}
+
+async fn generate_zip_preview(filelist_url: &str) -> anyhow::Result<()> {
+    println!("Generating zip preview");
+    let dir = Path::new("./tmp1");
+    for file in dir.read_dir()? {
+        let file = file?;
+        let path = file.path();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("zip") {
+            let tree = build_tree(path.to_str().unwrap())?;
+            let res = reqwest::Client::new()
+                .post(filelist_url)
+                .header("Content-Type", "application/json")
+                .json(&json!({
+                    "height": 250,
+                    "files": tree
+                }))
+                .send()
+                .await;
+
+            let res = match res {
+                Ok(res) => res,
+                Err(e) => {
+                    println!(
+                        "Generate zip preview failed: {}; file: {}",
+                        e,
+                        file.file_name().into_string().unwrap()
+                    );
+                    continue;
+                }
+            };
+
+            let bytes = res.bytes().await?;
+
+            let img = image::load_from_memory(&bytes)?;
+            img.to_rgb8().save_with_format(
+                format!("./tmp2/{}.jpg", path.file_stem().unwrap().to_str().unwrap()),
+                image::ImageFormat::Jpeg,
+            )?;
+            img.save_with_format(
+                format!(
+                    "./tmp3/{}.webp",
+                    path.file_stem().unwrap().to_str().unwrap()
+                ),
+                image::ImageFormat::WebP,
+            )?;
+        }
+    } //Generate zip preview
+
+    println!("Zip preview generated");
     Ok(())
 }
 
