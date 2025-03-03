@@ -12,7 +12,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
 };
 use webp::Encoder;
-use zip::ZipArchive;
+use zip::{HasZipMetadata, ZipArchive};
 
 use metadata::*;
 
@@ -330,7 +330,18 @@ fn build_tree(zip_path: &str) -> Result<Vec<FileNode>, anyhow::Error> {
     for i in 0..zip.len() {
         let entry = zip.by_index(i)?;
         let is_dir = entry.is_dir();
-        let path = entry.name().trim_matches('/').to_string();
+
+        let raw_name = entry.name_raw();
+
+        let name = if entry.get_metadata().is_utf8 || String::from_utf8(raw_name.to_vec()).is_ok() {
+            String::from_utf8_lossy(raw_name).into_owned()
+        } else {
+            let (cow, _, _) = encoding_rs::GB18030.decode(raw_name);
+            cow.into_owned()
+        };
+
+        let path = name.trim_matches('/').to_string();
+
         let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         if parts.is_empty() {
             continue;

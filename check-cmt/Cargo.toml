@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1.0.89"
+encoding_rs = "0.8.35"
 image = "0.25.2"
 isbn = "0.4.0"
 md5 = "0.7.0"
