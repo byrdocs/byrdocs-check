@@ -335,6 +335,15 @@ fn build_tree(zip_path: &str) -> Result<Vec<FileNode>, anyhow::Error> {
         if parts.is_empty() {
             continue;
         }
+        if parts[0] == "__MACOSX" {
+            continue;
+        }
+        if parts
+            .iter()
+            .any(|part| part.starts_with('.') || part.starts_with("~$"))
+        {
+            continue;
+        }
 
         let mut current_children = &mut root_children;
         for (index, part) in parts.iter().enumerate() {
