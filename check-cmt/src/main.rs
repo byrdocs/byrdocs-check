@@ -416,7 +416,7 @@ async fn generate_zip_preview(filelist_url: &str) -> anyhow::Result<()> {
                 .json(&json!({
                     "height": 425,
                     "width": 300,
-                    "fontSize": 19,
+                    "fontSize": 14,
                     "files": tree
                 }))
                 .send()
@@ -788,4 +788,17 @@ async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Ve
         }
     }
     s3_file_list
+}
+
+#[cfg(test)]
+mod test {
+    use crate::generate_zip_preview;
+
+    #[tokio::test]
+    async fn test_zip_preview() {
+        println!("Current directory: {:?}", std::env::current_dir().unwrap());
+        generate_zip_preview("https://filelist.byrdocs.org/png")
+            .await
+            .unwrap();
+    }
 }
