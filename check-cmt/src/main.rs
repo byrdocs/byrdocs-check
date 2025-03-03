@@ -397,6 +397,7 @@ async fn generate_zip_preview(filelist_url: &str) -> anyhow::Result<()> {
         let file = file?;
         let path = file.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("zip") {
+            println!("Processing zip file: {:?}", path.to_string_lossy().as_ref());
             let tree = build_tree(path.to_str().unwrap())?;
             let res = reqwest::Client::new()
                 .post(filelist_url)
@@ -434,6 +435,10 @@ async fn generate_zip_preview(filelist_url: &str) -> anyhow::Result<()> {
                 ),
                 image::ImageFormat::WebP,
             )?;
+            println!(
+                "Preview generated for zip file: {:?}",
+                path.to_string_lossy().as_ref()
+            );
         }
     } //Generate zip preview
 
