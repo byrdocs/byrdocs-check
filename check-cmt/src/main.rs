@@ -414,7 +414,9 @@ async fn generate_zip_preview(filelist_url: &str) -> anyhow::Result<()> {
                 .post(filelist_url)
                 .header("Content-Type", "application/json")
                 .json(&json!({
-                    "height": 250,
+                    "height": 425,
+                    "width": 300,
+                    "fontSize": 19,
                     "files": tree
                 }))
                 .send()
