@@ -214,7 +214,7 @@ async fn download_files(
     let dir = Path::new("./tmp1");
     for file in s3_obj {
         let key = file.key.clone().unwrap();
-        if files_need_update.contains(&key[..32]) && key.ends_with(".pdf") {
+        if files_need_update.contains(&key[..32]) {
             let request = rusoto_s3::GetObjectRequest {
                 bucket: bucket.clone(),
                 key: key.clone(),
