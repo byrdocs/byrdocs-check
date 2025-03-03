@@ -6,7 +6,6 @@ use rusoto_s3::{Object, S3Client, S3};
 use serde::Serialize;
 use serde_json::{json, to_string_pretty};
 use std::{collections::HashSet, path::Path};
-use structopt::StructOpt;
 use tokio::fs::File;
 use tokio::{
     self,
@@ -52,52 +51,50 @@ enum Status {
     Uploaded,
 }
 
-#[derive(StructOpt)]
 struct Input {
-    #[structopt(
-        short = "d",
-        long = "dir",
-        help = "The metadata path to check",
-        required = true
-    )]
     dir: String,
-    #[structopt(short = "u", long = "url", help = "S3 url", required = true)]
     s3_url: String,
-    #[structopt(short = "b", long = "backend", help = "Backend url", required = true)]
     backend_url: String,
-    #[structopt(short = "t", long = "token", help = "Token", required = true)]
     backend_token: String,
-    #[structopt(
-        short = "a",
-        long = "ACCESS_KEY_ID",
-        help = "ACCESS_KEY_ID",
-        required = true
-    )]
     assess_key_id: String,
-    #[structopt(
-        short = "s",
-        long = "SECRET_ACCESS_KEY",
-        help = "SECRET_ACCESS_KEY",
-        required = true
-    )]
     secret_access_key: String,
-    #[structopt(short = "c", long = "bucket", help = "bucket name", required = true)]
     bucket: String,
-    #[structopt(long = "r2_url", help = "R2 url", required = true)]
     r2_url: String,
-    #[structopt(long = "r2_acc", help = "R2 ACCESS_KEY_ID", required = true)]
     r2_access_key_id: String,
-    #[structopt(long = "r2_secret", help = "R2 SECRET", required = true)]
     r2_secret_access_key: String,
-    #[structopt(long = "r2_bucket", help = "R2 bucket", required = true)]
     r2_bucket: String,
-    #[structopt(long = "filelist_url", help = "Filelist URL", required = true)]
     filelist_url: String,
+}
+
+impl Input {
+    fn new() -> Self {
+        Self {
+            dir: std::env::var("DIR").expect("DIR environment variable not set"),
+            s3_url: std::env::var("S3_URL").expect("S3_URL environment variable not set"),
+            backend_url: std::env::var("BACKEND_URL")
+                .expect("BACKEND_URL environment variable not set"),
+            backend_token: std::env::var("BACKEND_TOKEN")
+                .expect("BACKEND_TOKEN environment variable not set"),
+            assess_key_id: std::env::var("ACCESS_KEY_ID")
+                .expect("ACCESS_KEY_ID environment variable not set"),
+            secret_access_key: std::env::var("SECRET_ACCESS_KEY")
+                .expect("SECRET_ACCESS_KEY environment variable not set"),
+            bucket: std::env::var("BUCKET").expect("BUCKET environment variable not set"),
+            r2_url: std::env::var("R2_URL").expect("R2_URL environment variable not set"),
+            r2_access_key_id: std::env::var("R2_ACCESS_KEY_ID")
+                .expect("R2_ACCESS_KEY_ID environment variable not set"),
+            r2_secret_access_key: std::env::var("R2_SECRET_ACCESS_KEY")
+                .expect("R2_SECRET_ACCESS_KEY environment variable not set"),
+            r2_bucket: std::env::var("R2_BUCKET").expect("R2_BUCKET environment variable not set"),
+            filelist_url: std::env::var("FILELIST_URL")
+                .expect("FILELIST_URL environment variable not set"),
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let input = Input::from_args();
+    let input = Input::new();
 
     if !Path::new(&input.dir).exists() {
         eprintln!("The metadata directory does not exist: {}", input.dir);

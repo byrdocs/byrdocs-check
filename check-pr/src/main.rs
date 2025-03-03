@@ -3,7 +3,6 @@ mod metadata;
 use rusoto_core::HttpClient;
 use rusoto_s3::S3;
 use std::path::Path;
-use structopt::StructOpt;
 use tokio::{
     self,
     io::{AsyncReadExt, BufReader},
@@ -11,32 +10,32 @@ use tokio::{
 
 use crate::metadata::*;
 
-#[derive(StructOpt)]
 struct Input {
-    #[structopt(short = "d", long = "dir", help = "The path to check", required = true)]
     dir: String,
-    #[structopt(short = "u", long = "url", help = "S3 url", required = true)]
     s3_url: String,
-    #[structopt(short = "b", long = "backend", help = "Backend url", required = true)]
     backend_url: String,
-    #[structopt(short = "t", long = "token", help = "Token", required = true)]
     backend_token: String,
-    #[structopt(
-        short = "a",
-        long = "ACCESS_KEY_ID",
-        help = "ACCESS_KEY_ID",
-        required = true
-    )]
     assess_key_id: String,
-    #[structopt(
-        short = "s",
-        long = "SECRET_ACCESS_KEY",
-        help = "SECRET_ACCESS_KEY",
-        required = true
-    )]
     secret_access_key: String,
-    #[structopt(short = "c", long = "bucket", help = "bucket name", required = true)]
     bucket: String,
+}
+
+impl Input {
+    fn new() -> Self {
+        Input {
+            dir: std::env::var("DIR").expect("DIR environment variable not set"),
+            s3_url: std::env::var("S3_URL").expect("S3_URL environment variable not set"),
+            backend_url: std::env::var("BACKEND_URL")
+                .expect("BACKEND_URL environment variable not set"),
+            backend_token: std::env::var("BACKEND_TOKEN")
+                .expect("BACKEND_TOKEN environment variable not set"),
+            assess_key_id: std::env::var("ACCESS_KEY_ID")
+                .expect("ACCESS_KEY_ID environment variable not set"),
+            secret_access_key: std::env::var("SECRET_ACCESS_KEY")
+                .expect("SECRET_ACCESS_KEY environment variable not set"),
+            bucket: std::env::var("BUCKET").expect("BUCKET environment variable not set"),
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -76,7 +75,7 @@ enum Status {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let input = Input::from_args();
+    let input = Input::new();
 
     let end_point = input.s3_url;
     let http_client = HttpClient::new()?;
