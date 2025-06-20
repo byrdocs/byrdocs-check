@@ -1,8 +1,6 @@
-mod metadata;
-
 use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
 use rusoto_core::HttpClient;
-use rusoto_s3::{Object, S3Client, S3};
+use rusoto_s3::{Object, S3, S3Client};
 use serde::Serialize;
 use serde_json::{json, to_string_pretty};
 use std::{collections::HashSet, path::Path};
@@ -14,7 +12,7 @@ use tokio::{
 use webp::Encoder;
 use zip::{HasZipMetadata, ZipArchive};
 
-use metadata::*;
+use byrdocs_check::metadata::*;
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]

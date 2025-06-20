@@ -1,5 +1,3 @@
-mod metadata;
-
 use rusoto_core::HttpClient;
 use rusoto_s3::S3;
 use std::path::Path;
@@ -8,7 +6,7 @@ use tokio::{
     io::{AsyncReadExt, BufReader},
 };
 
-use crate::metadata::*;
+use byrdocs_check::metadata::*;
 
 struct Input {
     dir: String,
@@ -95,9 +93,11 @@ async fn main() -> anyhow::Result<()> {
         .get(format!("{}/api/file/notPublished", input.backend_url))
         .bearer_auth(input.backend_token)
         .send()
-        .await?
+        .await
+        .unwrap()
         .json::<ApiResult>()
-        .await?;
+        .await
+        .unwrap();
 
     let mut success_book = 0;
     let mut success_test = 0;

@@ -1,12 +1,23 @@
-[workspace]
-members = [
-    "check-pr",
-    "check-cmt"
-]
-resolver = "2"
-
-[workspace.package]
+[package]
+name = "byrdocs-check"
 version = "0.1.0"
-edition = "2021"
-description = "A github action script to check metadata for byrdocs"
-license = "	MIT"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.89"
+encoding_rs = "0.8.35"
+image = "0.25.2"
+isbn = "0.4.0"
+md5 = "0.7.0"
+pdfium-render = "0.8.25"
+regex = "1.11.0"
+reqwest = { version = "0.12.8", features = ["json"] }
+rusoto = "0.24.2"
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+serde_yaml = "0.9.34"
+tokio = { version = "1.40.0", features = ["full"] }
+webp = "0.3.0"
+zip = "2.2.2"

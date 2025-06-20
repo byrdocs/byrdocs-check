@@ -1,6 +1,6 @@
-use serde::{ser::SerializeStruct, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, ser::SerializeStruct};
 
-#[derive(serde::Deserialize, Debug, Serialize, Clone, Copy)]
+#[derive(serde::Deserialize, Debug, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub enum Type {
     #[serde(rename = "test")]
@@ -39,6 +39,7 @@ pub struct Test {
     pub time: Time,
     pub filetype: String,
     pub content: Vec<String>,
+    #[serde(skip_deserializing)]
     pub filesize: Option<i64>,
 }
 
@@ -48,9 +49,7 @@ pub struct Test {
 pub struct Time {
     pub start: String,
     pub end: String,
-    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub semester: Option<String>,
-    #[serde(skip_serializing_if = "is_none_or_empty_string")]
     pub stage: Option<String>,
 }
 
@@ -79,6 +78,7 @@ pub struct Book {
     pub publisher: Option<String>,
     pub isbn: Vec<String>,
     pub filetype: String,
+    #[serde(skip_deserializing)]
     pub filesize: Option<i64>,
 }
 
@@ -90,6 +90,7 @@ pub struct Doc {
     pub filetype: String,
     pub course: Vec<Course>,
     pub content: Vec<String>,
+    #[serde(skip_deserializing)]
     pub filesize: Option<i64>,
 }
 
