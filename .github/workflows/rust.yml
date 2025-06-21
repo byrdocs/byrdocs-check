@@ -21,8 +21,8 @@ jobs:
         run: cargo build --all --release --verbose
       - name: Rename
         run: |
-          mv target/release/check-format target/release/check-cmt
-          mv target/release/upload-metadata target/release/check-pr
+          mv target/release/check-format target/release/check-pr
+          mv target/release/upload-metadata target/release/check-cmt
       - uses: actions/upload-artifact@v4
         with:
           name: check-cmt
