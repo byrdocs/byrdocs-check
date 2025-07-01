@@ -669,79 +669,118 @@ async fn backup_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
                 .as_ref()
                 .to_string();
             let mut retry = 3;
-            while let Err(e) = s3_client
-                .create_multipart_upload(rusoto_s3::CreateMultipartUploadRequest {
-                    bucket: bucket.clone(),
-                    key: file_name.clone(),
-                    storage_class: Some("DEEP_ARCHIVE".to_string()),
-                    ..Default::default()
-                })
-                .await
-                .and_then(|create_result| {
-                    Ok(async {
-                        let upload_id = create_result.upload_id.unwrap();
 
-                        // Use 5MB chunks (minimum size for S3 multipart)
-                        const CHUNK_SIZE: usize = 5 * 1024 * 1024;
-                        let mut parts = Vec::new();
+            'retry_loop: while retry > 0 {
+                let create_result = match s3_client
+                    .create_multipart_upload(rusoto_s3::CreateMultipartUploadRequest {
+                        bucket: bucket.clone(),
+                        key: file_name.clone(),
+                        storage_class: Some("DEEP_ARCHIVE".to_string()),
+                        ..Default::default()
+                    })
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        retry -= 1;
+                        println!("{file_name}: 创建上传请求失败: {e}，剩余重试次数: {retry}");
+                        continue 'retry_loop;
+                    }
+                };
 
-                        for (part_number, chunk) in buf.chunks(CHUNK_SIZE).enumerate() {
-                            let part_number = (part_number + 1) as i64;
+                let upload_id = match create_result.upload_id {
+                    Some(id) => id,
+                    None => {
+                        retry -= 1;
+                        println!("{file_name}: 无法获取上传ID，剩余重试次数: {retry}");
+                        continue 'retry_loop;
+                    }
+                };
 
-                            let upload_result = s3_client
-                                .upload_part(rusoto_s3::UploadPartRequest {
-                                    bucket: bucket.clone(),
-                                    key: file_name.clone(),
-                                    upload_id: upload_id.clone(),
-                                    part_number,
-                                    body: Some(chunk.to_vec().into()),
-                                    ..Default::default()
-                                })
-                                .await
-                                .unwrap();
+                const CHUNK_SIZE: usize = 5 * 1024 * 1024;
+                let mut parts = Vec::new();
+                let mut upload_failed = false;
 
+                for (part_number, chunk) in buf.chunks(CHUNK_SIZE).enumerate() {
+                    let part_number = (part_number + 1) as i64;
+
+                    match s3_client
+                        .upload_part(rusoto_s3::UploadPartRequest {
+                            bucket: bucket.clone(),
+                            key: file_name.clone(),
+                            upload_id: upload_id.clone(),
+                            part_number,
+                            body: Some(chunk.to_vec().into()),
+                            ..Default::default()
+                        })
+                        .await
+                    {
+                        Ok(upload_result) => {
                             parts.push(rusoto_s3::CompletedPart {
                                 e_tag: upload_result.e_tag,
                                 part_number: Some(part_number),
                             });
                         }
-
-                        s3_client
-                            .complete_multipart_upload(rusoto_s3::CompleteMultipartUploadRequest {
-                                bucket: bucket.clone(),
-                                key: file_name.clone(),
-                                upload_id,
-                                multipart_upload: Some(rusoto_s3::CompletedMultipartUpload {
-                                    parts: Some(parts),
-                                }),
-                                ..Default::default()
-                            })
-                            .await
-                    })
-                })
-            {
-                retry -= 1;
-                if retry <= 0 {
-                    break;
+                        Err(e) => {
+                            println!("{file_name}: 分块 {part_number} 上传失败: {e}");
+                            upload_failed = true;
+                            break;
+                        }
+                    }
                 }
-                println!("{file_name}: 上传失败: {e}，剩余重试次数: {retry}")
+
+                if upload_failed {
+                    retry -= 1;
+                    println!("{file_name}: 分块上传失败，剩余重试次数: {retry}");
+
+                    let _ = s3_client
+                        .abort_multipart_upload(rusoto_s3::AbortMultipartUploadRequest {
+                            bucket: bucket.clone(),
+                            key: file_name.clone(),
+                            upload_id: upload_id.clone(),
+                            ..Default::default()
+                        })
+                        .await;
+
+                    continue 'retry_loop;
+                }
+
+                match s3_client
+                    .complete_multipart_upload(rusoto_s3::CompleteMultipartUploadRequest {
+                        bucket: bucket.clone(),
+                        key: file_name.clone(),
+                        upload_id,
+                        multipart_upload: Some(rusoto_s3::CompletedMultipartUpload {
+                            parts: Some(parts),
+                        }),
+                        ..Default::default()
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        println!("{file_name}: 上传成功!");
+                        file_success += 1;
+                        break 'retry_loop;
+                    }
+                    Err(e) => {
+                        retry -= 1;
+                        println!("{file_name}: 完成上传失败: {e}，剩余重试次数: {retry}");
+                    }
+                }
             }
+
             if retry <= 0 {
-                println!("{file_name}: 上传失败！跳过此文件")
-            } else {
-                println!("{file_name}: 上传成功!");
-                file_success += 1;
+                println!("{file_name}: 上传失败！跳过此文件");
             }
         }
     }
     let file_failed = file_dir.read_dir()?.count() - file_success;
-    println!("Backup files uploaded, success: {file_success}, failed: {file_failed}",);
-    if !file_failed == 0 {
+    println!("Backup files uploaded, success: {file_success}, failed: {file_failed}");
+    if file_failed != 0 {
         Err(anyhow::anyhow!("Upload backup files failed"))
     } else {
         Ok(())
     }
-    //Upload files
 }
 
 async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Result<ApiResult> {
