@@ -21,7 +21,7 @@ struct ApiResult {
     files: Vec<TempFiles>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, Eq, PartialEq, Hash, Clone)]
 #[allow(dead_code)]
 struct TempFiles {
     id: u64,
@@ -39,7 +39,7 @@ struct TempFiles {
     error_message: Option<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, Eq, PartialEq, Hash, Clone)]
 enum Status {
     Published,
     Pending,
@@ -57,11 +57,18 @@ struct Input {
     assess_key_id: String,
     secret_access_key: String,
     bucket: String,
+    region: String,
     r2_url: String,
     r2_access_key_id: String,
     r2_secret_access_key: String,
     r2_bucket: String,
+    r2_region: String,
     filelist_url: String,
+    backup_url: String,
+    backup_access_key_id: String,
+    backup_secret_access_key: String,
+    backup_bucket: String,
+    backup_region: String,
 }
 
 impl Input {
@@ -78,14 +85,26 @@ impl Input {
             secret_access_key: std::env::var("SECRET_ACCESS_KEY")
                 .expect("SECRET_ACCESS_KEY environment variable not set"),
             bucket: std::env::var("BUCKET").expect("BUCKET environment variable not set"),
+            region: std::env::var("REGION").expect("REGION environment variable not set"),
             r2_url: std::env::var("R2_URL").expect("R2_URL environment variable not set"),
             r2_access_key_id: std::env::var("R2_ACCESS_KEY_ID")
                 .expect("R2_ACCESS_KEY_ID environment variable not set"),
             r2_secret_access_key: std::env::var("R2_SECRET_ACCESS_KEY")
                 .expect("R2_SECRET_ACCESS_KEY environment variable not set"),
             r2_bucket: std::env::var("R2_BUCKET").expect("R2_BUCKET environment variable not set"),
+            r2_region: std::env::var("R2_REGION").expect("R2_REGION environment variable not set"),
             filelist_url: std::env::var("FILELIST_URL")
                 .expect("FILELIST_URL environment variable not set"),
+            backup_url: std::env::var("BACKUP_URL")
+                .expect("BACKUP_URL environment variable not set"),
+            backup_access_key_id: std::env::var("BACKUP_ACCESS_KEY_ID")
+                .expect("BACKUP_ACCESS_KEY_ID environment variable not set"),
+            backup_secret_access_key: std::env::var("BACKUP_SECRET_ACCESS_KEY")
+                .expect("BACKUP_SECRET_ACCESS_KEY environment variable not set"),
+            backup_bucket: std::env::var("BACKUP_BUCKET")
+                .expect("BACKUP_BUCKET environment variable not set"),
+            backup_region: std::env::var("BACKUP_REGION")
+                .expect("BACKUP_REGION environment variable not set"),
         }
     }
 }
@@ -99,12 +118,24 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    let s3_client =
-        get_s3_client(input.s3_url, input.assess_key_id, input.secret_access_key).await?;
+    let s3_client = get_s3_client(
+        input.s3_url,
+        input.assess_key_id,
+        input.secret_access_key,
+        input.region,
+    )
+    .await?;
     let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
+    let backup_client = get_s3_client(
+        input.backup_url,
+        input.backup_access_key_id,
+        input.backup_secret_access_key,
+        input.backup_region,
+    )
+    .await?;
     let mut api_result = get_temp_files(&input.backend_url, &input.backend_token).await?;
 
-    let ids = get_publish_ids(&input.dir, &mut api_result).await?; // get publish list and remove published files from temp_files
+    let need_publish_files = get_publish_files(&input.dir, &mut api_result).await?; // get publish list and remove published files from temp_files
 
     //image part
 
@@ -113,19 +144,31 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all("./tmp1")?;
     std::fs::create_dir_all("./tmp2")?;
     std::fs::create_dir_all("./tmp3")?;
-    download_files(&s3_client, &s3_obj, nocover_files, input.bucket.clone()).await?;
+    download_files(
+        &s3_client,
+        &s3_obj,
+        need_publish_files
+            .iter()
+            .map(|f| f.file_name.clone())
+            .collect::<HashSet<_>>(),
+        input.bucket.clone(),
+    )
+    .await?;
 
-    generate_pdf_covers().await?;
+    generate_pdf_covers(nocover_files.clone()).await?;
 
-    generate_zip_preview(&input.filelist_url).await?;
+    generate_zip_preview(&input.filelist_url, nocover_files.clone()).await?;
 
     reduce_webp_size().await?;
 
-    upload_files(&s3_client, input.bucket).await?;
+    upload_images(&s3_client, input.bucket).await?;
 
     //image part over
 
-    publish_files(ids, input.backend_url, input.backend_token).await?; // publish files
+    publish_files(need_publish_files, input.backend_url, input.backend_token).await?; // publish files
+
+    // Upload to backup storage
+    backup_files(&backup_client, input.backup_bucket).await?;
 
     merge_json(&input.dir, &s3_obj).await?;
 
@@ -134,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
         input.r2_access_key_id,
         input.r2_secret_access_key,
         input.r2_bucket,
+        input.r2_region,
         &input.dir,
     )
     .await?;
@@ -147,13 +191,17 @@ async fn get_s3_client(
     s3_url: String,
     access_key: String,
     secret_key: String,
+    region: String,
 ) -> anyhow::Result<S3Client> {
     let end_point = s3_url;
     let http_client = HttpClient::new()?;
     let credentials = rusoto_core::credential::StaticProvider::new_minimal(access_key, secret_key);
-    let region = rusoto_core::Region::Custom {
-        name: "apac".to_owned(),
-        endpoint: end_point,
+    let region = match region.parse() {
+        Ok(region) => region,
+        Err(_) => rusoto_core::Region::Custom {
+            name: region,
+            endpoint: end_point,
+        },
     };
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
     Ok(s3_client)
@@ -232,7 +280,7 @@ async fn download_files(
     Ok(())
 }
 
-async fn generate_pdf_covers() -> anyhow::Result<()> {
+async fn generate_pdf_covers(nocover_files: HashSet<String>) -> anyhow::Result<()> {
     println!("Generating images");
     let dir = Path::new("./tmp1");
     let pdfium = Pdfium::new(
@@ -243,7 +291,10 @@ async fn generate_pdf_covers() -> anyhow::Result<()> {
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("pdf") {
+        if path.is_file()
+            && path.extension().and_then(|s| s.to_str()) == Some("pdf")
+            && nocover_files.contains(&path.file_name().unwrap().to_str().unwrap()[..32])
+        {
             println!("Processing pdf: {:?}", path.to_string_lossy().as_ref());
             let mut reader = BufReader::new(File::open(&path).await?);
             let mut context = md5::Context::new();
@@ -399,13 +450,19 @@ fn build_tree(zip_path: &str) -> Result<Vec<FileNode>, anyhow::Error> {
     Ok(root_children)
 }
 
-async fn generate_zip_preview(filelist_url: &str) -> anyhow::Result<()> {
+async fn generate_zip_preview(
+    filelist_url: &str,
+    nocover_files: HashSet<String>,
+) -> anyhow::Result<()> {
     println!("Generating zip preview");
     let dir = Path::new("./tmp1");
     for file in dir.read_dir()? {
         let file = file?;
         let path = file.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("zip") {
+        if path.is_file()
+            && path.extension().and_then(|s| s.to_str()) == Some("zip")
+            && nocover_files.contains(&path.file_name().unwrap().to_str().unwrap()[..32])
+        {
             println!("Processing zip file: {:?}", path.to_string_lossy().as_ref());
             let tree = build_tree(path.to_str().unwrap())?;
             let res = reqwest::Client::new()
@@ -485,7 +542,7 @@ async fn reduce_webp_size() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()> {
+async fn upload_images(s3_client: &S3Client, bucket: String) -> anyhow::Result<()> {
     let jpg_dir = Path::new("./tmp2");
     println!("Uploading jpg files: {:#?}", jpg_dir.read_dir()?.count());
     let mut jpg_success = 0;
@@ -588,6 +645,62 @@ async fn upload_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
     //Upload files
 }
 
+async fn backup_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()> {
+    let file_dir = Path::new("./tmp1");
+    println!(
+        "Uploading backup files: {:#?}",
+        file_dir.read_dir()?.count()
+    );
+    let mut file_success = 0;
+    for file in file_dir.read_dir()? {
+        let file = file?;
+        let path = file.path();
+        if path.is_file() {
+            let file = File::open(&path).await?;
+            let mut reader = BufReader::new(file);
+            let mut buf = Vec::new();
+            reader.read_to_end(&mut buf).await?;
+            let file_name = path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+                .to_string();
+            let mut retry = 3;
+            while let Err(e) = s3_client
+                .put_object(rusoto_s3::PutObjectRequest {
+                    bucket: bucket.clone(),
+                    key: file_name.clone(),
+                    body: Some(buf.clone().into()),
+                    storage_class: Some("DEEP_ARCHIVE".to_string()),
+                    ..Default::default()
+                })
+                .await
+            {
+                retry -= 1;
+                if retry <= 0 {
+                    break;
+                }
+                println!("{file_name}: 上传失败: {e}，剩余重试次数: {retry}")
+            }
+            if retry <= 0 {
+                println!("{file_name}: 上传失败！跳过此文件")
+            } else {
+                println!("{file_name}: 上传成功!");
+                file_success += 1;
+            }
+        }
+    }
+    let file_failed = file_dir.read_dir()?.count() - file_success;
+    println!("Backup files uploaded, success: {file_success}, failed: {file_failed}",);
+    if !file_failed == 0 {
+        Err(anyhow::anyhow!("Upload backup files failed"))
+    } else {
+        Ok(())
+    }
+    //Upload files
+}
+
 async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Result<ApiResult> {
     let backend_client = reqwest::Client::new();
     let temp_files = backend_client
@@ -600,7 +713,10 @@ async fn get_temp_files(backend_url: &str, backend_token: &str) -> anyhow::Resul
     Ok(temp_files)
 }
 
-async fn get_publish_ids(dir: &str, api_result: &mut ApiResult) -> anyhow::Result<HashSet<u64>> {
+async fn get_publish_files(
+    dir: &str,
+    api_result: &mut ApiResult,
+) -> anyhow::Result<HashSet<TempFiles>> {
     let path = Path::new(dir);
     let mut local_files = HashSet::new();
     for file in path.read_dir()? {
@@ -630,7 +746,7 @@ async fn get_publish_ids(dir: &str, api_result: &mut ApiResult) -> anyhow::Resul
         .files
         .iter()
         .filter(|file| publish_list.contains(&file.file_name[..32]))
-        .map(|file| file.id)
+        .cloned()
         .collect::<HashSet<_>>();
     api_result
         .files
@@ -640,10 +756,11 @@ async fn get_publish_ids(dir: &str, api_result: &mut ApiResult) -> anyhow::Resul
 }
 
 async fn publish_files(
-    ids: HashSet<u64>,
+    files: HashSet<TempFiles>,
     backend_url: String,
     backend_token: String,
 ) -> anyhow::Result<()> {
+    let ids = files.iter().map(|file| file.id).collect::<Vec<_>>();
     println!("Publishing files: {:#?}", ids);
     let backend_client = reqwest::Client::new();
     let res = backend_client
@@ -732,10 +849,12 @@ async fn upload_metadata(
     r2_access_key_id: String,
     r2_secret_access_key: String,
     r2_bucket: String,
+    r2_region: String,
     dir: &String,
 ) -> anyhow::Result<()> {
     println!("Uploading metadata to R2");
-    let r2_client = get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key).await?;
+    let r2_client =
+        get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key, r2_region).await?;
     let metadata_json = File::open(Path::new(&dir).join("metadata2.json")).await?;
     let mut reader = BufReader::new(metadata_json);
     let mut buf = Vec::new();
@@ -790,12 +909,14 @@ async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Ve
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use crate::generate_zip_preview;
 
     #[tokio::test]
     async fn test_zip_preview() {
         println!("Current directory: {:?}", std::env::current_dir().unwrap());
-        generate_zip_preview("https://filelist.byrdocs.org/png")
+        generate_zip_preview("https://filelist.byrdocs.org/png", HashSet::new())
             .await
             .unwrap();
     }
