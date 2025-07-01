@@ -260,7 +260,9 @@ async fn download_files(
     let dir = Path::new("./tmp1");
     for file in s3_obj {
         let key = file.key.clone().unwrap();
-        if files_need_update.contains(&key[..32]) {
+        if files_need_update.contains(&key[..32])
+            && (key.ends_with(".pdf") || key.ends_with(".zip"))
+        {
             let request = rusoto_s3::GetObjectRequest {
                 bucket: bucket.clone(),
                 key: key.clone(),
@@ -668,14 +670,55 @@ async fn backup_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
                 .to_string();
             let mut retry = 3;
             while let Err(e) = s3_client
-                .put_object(rusoto_s3::PutObjectRequest {
+                .create_multipart_upload(rusoto_s3::CreateMultipartUploadRequest {
                     bucket: bucket.clone(),
                     key: file_name.clone(),
-                    body: Some(buf.clone().into()),
                     storage_class: Some("DEEP_ARCHIVE".to_string()),
                     ..Default::default()
                 })
                 .await
+                .and_then(|create_result| {
+                    Ok(async {
+                        let upload_id = create_result.upload_id.unwrap();
+
+                        // Use 5MB chunks (minimum size for S3 multipart)
+                        const CHUNK_SIZE: usize = 5 * 1024 * 1024;
+                        let mut parts = Vec::new();
+
+                        for (part_number, chunk) in buf.chunks(CHUNK_SIZE).enumerate() {
+                            let part_number = (part_number + 1) as i64;
+
+                            let upload_result = s3_client
+                                .upload_part(rusoto_s3::UploadPartRequest {
+                                    bucket: bucket.clone(),
+                                    key: file_name.clone(),
+                                    upload_id: upload_id.clone(),
+                                    part_number,
+                                    body: Some(chunk.to_vec().into()),
+                                    ..Default::default()
+                                })
+                                .await
+                                .unwrap();
+
+                            parts.push(rusoto_s3::CompletedPart {
+                                e_tag: upload_result.e_tag,
+                                part_number: Some(part_number),
+                            });
+                        }
+
+                        s3_client
+                            .complete_multipart_upload(rusoto_s3::CompleteMultipartUploadRequest {
+                                bucket: bucket.clone(),
+                                key: file_name.clone(),
+                                upload_id,
+                                multipart_upload: Some(rusoto_s3::CompletedMultipartUpload {
+                                    parts: Some(parts),
+                                }),
+                                ..Default::default()
+                            })
+                            .await
+                    })
+                })
             {
                 retry -= 1;
                 if retry <= 0 {
