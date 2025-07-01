@@ -149,7 +149,7 @@ async fn main() -> anyhow::Result<()> {
         &s3_obj,
         need_publish_files
             .iter()
-            .map(|f| f.file_name.clone())
+            .map(|f| f.file_name[..32].to_string())
             .collect::<HashSet<_>>(),
         input.bucket.clone(),
     )
