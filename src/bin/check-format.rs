@@ -6,32 +6,31 @@ use tokio::{
     io::{AsyncReadExt, BufReader},
 };
 
-use byrdocs_check::metadata::*;
+use byrdocs_check::{get_env,metadata::*};
 
 struct Input {
-    dir: String,
-    s3_url: String,
-    backend_url: String,
-    backend_token: String,
-    assess_key_id: String,
-    secret_access_key: String,
-    bucket: String,
+    metadata_dir: String,
+    r2_endpoint: String,
+    r2_access_key_id: String,
+    r2_secret_access_key: String,
+    r2_file_bucket: String,
+    byrdocs_site_url: String,
+    byrdocs_site_token: String,
 }
 
 impl Input {
     fn new() -> Self {
         Input {
-            dir: std::env::var("DIR").expect("DIR environment variable not set"),
-            s3_url: std::env::var("S3_URL").expect("S3_URL environment variable not set"),
-            backend_url: std::env::var("BACKEND_URL")
-                .expect("BACKEND_URL environment variable not set"),
-            backend_token: std::env::var("BACKEND_TOKEN")
-                .expect("BACKEND_TOKEN environment variable not set"),
-            assess_key_id: std::env::var("ACCESS_KEY_ID")
-                .expect("ACCESS_KEY_ID environment variable not set"),
-            secret_access_key: std::env::var("SECRET_ACCESS_KEY")
-                .expect("SECRET_ACCESS_KEY environment variable not set"),
-            bucket: std::env::var("BUCKET").expect("BUCKET environment variable not set"),
+            metadata_dir: get_env("METADATA_DIR"),
+            r2_endpoint: format!(
+                "https://{}.r2.cloudflarestorage.com",
+                get_env("R2_ACCOUNT_ID"),
+            ),
+            r2_access_key_id: get_env("R2_ACCESS_KEY_ID"),
+            r2_secret_access_key: get_env("R2_SECRET_ACCESS_KEY"),
+            r2_file_bucket: get_env("R2_FILE_BUCKET"),
+            byrdocs_site_url: get_env("BYRDOCS_SITE_URL"),
+            byrdocs_site_token: get_env("BYRDOCS_SITE_TOKEN"),
         }
     }
 }
@@ -75,23 +74,23 @@ enum Status {
 async fn main() -> anyhow::Result<()> {
     let input = Input::new();
 
-    let end_point = input.s3_url;
+    let end_point = input.r2_endpoint;
     let http_client = HttpClient::new()?;
     let credentials = rusoto_core::credential::StaticProvider::new_minimal(
-        input.assess_key_id,
-        input.secret_access_key,
+        input.r2_access_key_id,
+        input.r2_secret_access_key,
     );
     let region = rusoto_core::Region::Custom {
-        name: "byr".to_owned(),
+        name: "auto".to_owned(),
         endpoint: end_point,
     };
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
-    let s3_file_list = list_all_objects(&s3_client, &input.bucket).await;
+    let s3_file_list = list_all_objects(&s3_client, &input.r2_file_bucket).await;
 
     let backend_client = reqwest::Client::new();
     let api_result = backend_client
-        .get(format!("{}/api/file/notPublished", input.backend_url))
-        .bearer_auth(input.backend_token)
+        .get(format!("{}/api/file/notPublished", input.byrdocs_site_url))
+        .bearer_auth(input.byrdocs_site_token)
         .send()
         .await
         .unwrap()
@@ -103,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
     let mut success_test = 0;
     let mut success_doc = 0;
     let mut total = 0;
-    let dir_path = Path::new(&input.dir);
+    let dir_path = Path::new(&input.metadata_dir);
 
     for entry in dir_path.read_dir()? {
         total += 1;
@@ -134,8 +133,9 @@ async fn main() -> anyhow::Result<()> {
                 &s3_file_list,
                 &path,
                 &api_result,
-                &input.bucket,
+                &input.r2_file_bucket,
                 &s3_client,
+                &input.byrdocs_site_url,
             )
             .await
             {
@@ -225,8 +225,9 @@ async fn check(
     s3_file_list: &Vec<String>,
     path: &Path,
     api_result: &ApiResult,
-    bucket: &str,
+    r2_file_bucket: &str,
     s3_client: &rusoto_s3::S3Client,
+    byrdocs_site_url:&str,
 ) -> anyhow::Result<()> {
     let mut errors = Vec::new();
 
@@ -240,7 +241,10 @@ async fn check(
     }
 
     let url_regex =
-        regex::Regex::new(r"^https://byrdocs\.org/files/[a-fA-F0-9]{32}\.(pdf|zip)$").unwrap();
+        regex::Regex::new(&format!(
+            r"^{}/files/[a-fA-F0-9]{{32}}\.(pdf|zip)$",
+            regex::escape(&byrdocs_site_url),
+        )).unwrap();
 
     if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
         errors.push(anyhow::anyhow!("请检查文件是否上传"));
@@ -275,7 +279,7 @@ async fn check(
                 }
                 _ => {
                     let request = rusoto_s3::GetObjectRequest {
-                        bucket: bucket.to_string(),
+                        bucket: r2_file_bucket.to_string(),
                         key: metadata.url[metadata.url.len() - 36..].to_string(),
                         ..Default::default()
                     };

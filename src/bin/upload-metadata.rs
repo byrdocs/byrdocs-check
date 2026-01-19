@@ -12,7 +12,7 @@ use tokio::{
 use webp::Encoder;
 use zip::{HasZipMetadata, ZipArchive};
 
-use byrdocs_check::metadata::*;
+use byrdocs_check::{get_env,metadata::*};
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
@@ -50,61 +50,40 @@ enum Status {
 }
 
 struct Input {
-    dir: String,
-    s3_url: String,
-    backend_url: String,
-    backend_token: String,
-    assess_key_id: String,
-    secret_access_key: String,
-    bucket: String,
-    region: String,
-    r2_url: String,
+    metadata_dir: String,
+    r2_endpoint: String,
     r2_access_key_id: String,
     r2_secret_access_key: String,
-    r2_bucket: String,
-    r2_region: String,
-    filelist_url: String,
-    backup_url: String,
+    r2_file_bucket: String,
+    r2_data_bucket: String,
+    byrdocs_site_url: String,
+    byrdocs_site_token: String,
+    filelist_site_url: String,
+    backup_endpoint: String,
     backup_access_key_id: String,
     backup_secret_access_key: String,
-    backup_bucket: String,
-    backup_region: String,
+    backup_file_bucket: String,
 }
 
 impl Input {
     fn new() -> Self {
         Self {
-            dir: std::env::var("DIR").expect("DIR environment variable not set"),
-            s3_url: std::env::var("S3_URL").expect("S3_URL environment variable not set"),
-            backend_url: std::env::var("BACKEND_URL")
-                .expect("BACKEND_URL environment variable not set"),
-            backend_token: std::env::var("BACKEND_TOKEN")
-                .expect("BACKEND_TOKEN environment variable not set"),
-            assess_key_id: std::env::var("ACCESS_KEY_ID")
-                .expect("ACCESS_KEY_ID environment variable not set"),
-            secret_access_key: std::env::var("SECRET_ACCESS_KEY")
-                .expect("SECRET_ACCESS_KEY environment variable not set"),
-            bucket: std::env::var("BUCKET").expect("BUCKET environment variable not set"),
-            region: std::env::var("REGION").expect("REGION environment variable not set"),
-            r2_url: std::env::var("R2_URL").expect("R2_URL environment variable not set"),
-            r2_access_key_id: std::env::var("R2_ACCESS_KEY_ID")
-                .expect("R2_ACCESS_KEY_ID environment variable not set"),
-            r2_secret_access_key: std::env::var("R2_SECRET_ACCESS_KEY")
-                .expect("R2_SECRET_ACCESS_KEY environment variable not set"),
-            r2_bucket: std::env::var("R2_BUCKET").expect("R2_BUCKET environment variable not set"),
-            r2_region: std::env::var("R2_REGION").expect("R2_REGION environment variable not set"),
-            filelist_url: std::env::var("FILELIST_URL")
-                .expect("FILELIST_URL environment variable not set"),
-            backup_url: std::env::var("BACKUP_URL")
-                .expect("BACKUP_URL environment variable not set"),
-            backup_access_key_id: std::env::var("BACKUP_ACCESS_KEY_ID")
-                .expect("BACKUP_ACCESS_KEY_ID environment variable not set"),
-            backup_secret_access_key: std::env::var("BACKUP_SECRET_ACCESS_KEY")
-                .expect("BACKUP_SECRET_ACCESS_KEY environment variable not set"),
-            backup_bucket: std::env::var("BACKUP_BUCKET")
-                .expect("BACKUP_BUCKET environment variable not set"),
-            backup_region: std::env::var("BACKUP_REGION")
-                .expect("BACKUP_REGION environment variable not set"),
+            metadata_dir: get_env("METADATA_DIR"),
+            r2_endpoint: format!(
+                "https://{}.r2.cloudflarestorage.com",
+                get_env("R2_ACCOUNT_ID"),
+            ),
+            r2_access_key_id: get_env("R2_ACCESS_KEY_ID"),
+            r2_secret_access_key: get_env("R2_SECRET_ACCESS_KEY"),
+            r2_file_bucket: get_env("R2_FILE_BUCKET"),
+            r2_data_bucket: get_env("R2_DATA_BUCKET"),
+            byrdocs_site_url: get_env("BYRDOCS_SITE_URL"),
+            byrdocs_site_token: get_env("BYRDOCS_SITE_TOKEN"),
+            filelist_site_url: get_env("FILELIST_SITE_URL"),
+            backup_endpoint: get_env("BACKUP_ENDPOINT"),
+            backup_access_key_id: get_env("BACKUP_ACCESS_KEY_ID"),
+            backup_secret_access_key: get_env("BACKUP_SECRET_ACCESS_KEY"),
+            backup_file_bucket: get_env("BACKUP_FILE_BUCKET"),
         }
     }
 }
@@ -113,29 +92,27 @@ impl Input {
 async fn main() -> anyhow::Result<()> {
     let input = Input::new();
 
-    if !Path::new(&input.dir).exists() {
-        eprintln!("The metadata directory does not exist: {}", input.dir);
+    if !Path::new(&input.metadata_dir).exists() {
+        eprintln!("The metadata directory does not exist: {}", input.metadata_dir);
         std::process::exit(1);
     }
 
     let s3_client = get_s3_client(
-        input.s3_url,
-        input.assess_key_id,
-        input.secret_access_key,
-        input.region,
+        input.r2_endpoint.clone(),
+        input.r2_access_key_id.clone(),
+        input.r2_secret_access_key.clone(),
     )
     .await?;
-    let s3_obj = list_all_objects(&s3_client, &input.bucket).await;
+    let s3_obj = list_all_objects(&s3_client, &input.r2_file_bucket).await;
     let backup_client = get_s3_client(
-        input.backup_url,
-        input.backup_access_key_id,
-        input.backup_secret_access_key,
-        input.backup_region,
+        input.backup_endpoint.clone(),
+        input.backup_access_key_id.clone(),
+        input.backup_secret_access_key.clone(),
     )
     .await?;
-    let mut api_result = get_temp_files(&input.backend_url, &input.backend_token).await?;
+    let mut api_result = get_temp_files(&input.byrdocs_site_url, &input.byrdocs_site_token).await?;
 
-    let need_publish_files = get_publish_files(&input.dir, &mut api_result).await?; // get publish list and remove published files from temp_files
+    let need_publish_files = get_publish_files(&input.metadata_dir, &mut api_result).await?; // get publish list and remove published files from temp_files
 
     //image part
 
@@ -151,34 +128,33 @@ async fn main() -> anyhow::Result<()> {
             .iter()
             .map(|f| f.file_name[..32].to_string())
             .collect::<HashSet<_>>(),
-        input.bucket.clone(),
+        input.r2_file_bucket.clone(),
     )
     .await?;
 
     generate_pdf_covers(nocover_files.clone()).await?;
 
-    generate_zip_preview(&input.filelist_url, nocover_files.clone()).await?;
+    generate_zip_preview(&input.filelist_site_url, nocover_files.clone()).await?;
 
     reduce_webp_size().await?;
 
-    upload_images(&s3_client, input.bucket).await?;
+    upload_images(&s3_client, input.r2_file_bucket).await?;
 
     //image part over
 
-    publish_files(need_publish_files, input.backend_url, input.backend_token).await?; // publish files
+    publish_files(need_publish_files, input.byrdocs_site_url, input.byrdocs_site_token).await?; // publish files
 
     // Upload to backup storage
-    backup_files(&backup_client, input.backup_bucket).await?;
+    backup_files(&backup_client, input.backup_file_bucket).await?;
 
-    merge_json(&input.dir, &s3_obj).await?;
+    merge_json(&input.metadata_dir, &s3_obj).await?;
 
     upload_metadata(
-        input.r2_url,
+        input.r2_endpoint,
         input.r2_access_key_id,
         input.r2_secret_access_key,
-        input.r2_bucket,
-        input.r2_region,
-        &input.dir,
+        input.r2_data_bucket,
+        &input.metadata_dir,
     )
     .await?;
 
@@ -188,20 +164,15 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn get_s3_client(
-    s3_url: String,
-    access_key: String,
-    secret_key: String,
-    region: String,
+    r2_endpoint: String,
+    access_key_id: String,
+    secret_access_key: String,
 ) -> anyhow::Result<S3Client> {
-    let end_point = s3_url;
     let http_client = HttpClient::new()?;
-    let credentials = rusoto_core::credential::StaticProvider::new_minimal(access_key, secret_key);
-    let region = match region.parse() {
-        Ok(region) => region,
-        Err(_) => rusoto_core::Region::Custom {
-            name: region,
-            endpoint: end_point,
-        },
+    let credentials = rusoto_core::credential::StaticProvider::new_minimal(access_key_id, secret_access_key);
+    let region = rusoto_core::Region::Custom {
+        name: "auto".to_owned(),
+        endpoint: r2_endpoint,
     };
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
     Ok(s3_client)
@@ -453,7 +424,7 @@ fn build_tree(zip_path: &str) -> Result<Vec<FileNode>, anyhow::Error> {
 }
 
 async fn generate_zip_preview(
-    filelist_url: &str,
+    filelist_site_url: &str,
     nocover_files: HashSet<String>,
 ) -> anyhow::Result<()> {
     println!("Generating zip preview");
@@ -468,7 +439,7 @@ async fn generate_zip_preview(
             println!("Processing zip file: {:?}", path.to_string_lossy().as_ref());
             let tree = build_tree(path.to_str().unwrap())?;
             let res = reqwest::Client::new()
-                .post(filelist_url)
+                .post(filelist_site_url)
                 .header("Content-Type", "application/json")
                 .json(&json!({
                     "height": 425,
@@ -675,7 +646,7 @@ async fn backup_files(s3_client: &S3Client, bucket: String) -> anyhow::Result<()
                     .create_multipart_upload(rusoto_s3::CreateMultipartUploadRequest {
                         bucket: bucket.clone(),
                         key: file_name.clone(),
-                        storage_class: Some("DEEP_ARCHIVE".to_string()),
+                        storage_class: Some("STANDARD".to_string()),
                         ..Default::default()
                     })
                     .await
@@ -908,7 +879,7 @@ async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
             json.push(metadata);
         }
     }
-    let temp_file_path = dir.join("metadata2.json");
+    let temp_file_path = dir.join("metadata.json");
     let mut temp_file = File::create(&temp_file_path).await?;
     let json_data = serde_json::to_string(&json)?;
     temp_file.write_all(json_data.as_bytes()).await?;
@@ -930,20 +901,18 @@ async fn upload_metadata(
     r2_url: String,
     r2_access_key_id: String,
     r2_secret_access_key: String,
-    r2_bucket: String,
-    r2_region: String,
+    bucket: String,
     dir: &String,
 ) -> anyhow::Result<()> {
     println!("Uploading metadata to R2");
-    let r2_client =
-        get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key, r2_region).await?;
-    let metadata_json = File::open(Path::new(&dir).join("metadata2.json")).await?;
+    let r2_client = get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key).await?;
+    let metadata_json = File::open(Path::new(&dir).join("metadata.json")).await?;
     let mut reader = BufReader::new(metadata_json);
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).await?;
     let request = rusoto_s3::PutObjectRequest {
-        bucket: r2_bucket.clone(),
-        key: "metadata2.json".to_string(),
+        bucket: bucket.clone(),
+        key: "metadata.json".to_string(),
         body: Some(buf.into()),
         content_type: Some("application/json".to_string()),
         ..Default::default()
@@ -953,13 +922,13 @@ async fn upload_metadata(
     Ok(())
 }
 
-async fn list_all_objects(client: &rusoto_s3::S3Client, bucket_name: &str) -> Vec<Object> {
+async fn list_all_objects(client: &rusoto_s3::S3Client, bucket: &str) -> Vec<Object> {
     let mut continuation_token: Option<String> = None;
     let mut s3_file_list = Vec::new();
 
     loop {
         let request = rusoto_s3::ListObjectsV2Request {
-            bucket: bucket_name.to_string(),
+            bucket: bucket.to_string(),
             continuation_token: continuation_token.clone(),
             ..Default::default()
         };
