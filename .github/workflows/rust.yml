@@ -19,18 +19,14 @@ jobs:
         uses: Swatinem/rust-cache@v2.7.5
       - name: Build
         run: cargo build --all --release --verbose
-      - name: Rename
-        run: |
-          mv target/release/check-format target/release/check-pr
-          mv target/release/upload-metadata target/release/check-cmt
       - uses: actions/upload-artifact@v4
         with:
-          name: check-cmt
-          path: target/release/check-cmt
+          name: upload-metadata
+          path: target/release/upload-metadata
       - uses: actions/upload-artifact@v4
         with:
-          name: check-pr
-          path: target/release/check-pr
+          name: check-format
+          path: target/release/check-format
       - name: Create Release and Upload Release Asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
@@ -40,5 +36,5 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            target/release/check-cmt
-            target/release/check-pr
+            target/release/upload-metadata
+            target/release/check-format
