@@ -72,7 +72,7 @@ struct Input {
 impl Input {
     fn new() -> Self {
         Self {
-            metadata_dir: get_env("METADATA_DIR"),
+            metadata_dir: get_absolute_path_from_env("METADATA_DIR"),
             r2_endpoint: format!(
                 "https://{}.r2.cloudflarestorage.com",
                 get_env("R2_ACCOUNT_ID"),
@@ -90,6 +90,21 @@ impl Input {
             backup_file_bucket: get_env("BACKUP_FILE_BUCKET"),
         }
     }
+}
+
+fn get_absolute_path_from_env(key: &str) -> String {
+    let path = PathBuf::from(get_env(key));
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()
+            .expect("Failed to resolve current directory")
+            .join(path)
+    };
+    path.canonicalize()
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[tokio::main]
