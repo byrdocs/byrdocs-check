@@ -3,7 +3,11 @@ use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3, S3Client};
 use serde::Serialize;
 use serde_json::{json, to_string_pretty};
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    process::Command,
+};
 use tokio::fs::File;
 use tokio::{
     self,
@@ -12,7 +16,7 @@ use tokio::{
 use webp::Encoder;
 use zip::{HasZipMetadata, ZipArchive};
 
-use byrdocs_check::{get_env,metadata::*};
+use byrdocs_check::{get_env, metadata::*};
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
@@ -93,7 +97,10 @@ async fn main() -> anyhow::Result<()> {
     let input = Input::new();
 
     if !Path::new(&input.metadata_dir).exists() {
-        eprintln!("The metadata directory does not exist: {}", input.metadata_dir);
+        eprintln!(
+            "The metadata directory does not exist: {}",
+            input.metadata_dir
+        );
         std::process::exit(1);
     }
 
@@ -142,12 +149,18 @@ async fn main() -> anyhow::Result<()> {
 
     //image part over
 
-    publish_files(need_publish_files, input.byrdocs_site_url, input.byrdocs_site_token).await?; // publish files
+    publish_files(
+        need_publish_files,
+        input.byrdocs_site_url.clone(),
+        input.byrdocs_site_token,
+    )
+    .await?; // publish files
 
     // Upload to backup storage
     backup_files(&backup_client, input.backup_file_bucket).await?;
 
     merge_json(&input.metadata_dir, &s3_obj).await?;
+    generate_sitemap(&input.metadata_dir, &input.byrdocs_site_url).await?;
 
     upload_metadata(
         input.r2_endpoint,
@@ -169,7 +182,8 @@ async fn get_s3_client(
     secret_access_key: String,
 ) -> anyhow::Result<S3Client> {
     let http_client = HttpClient::new()?;
-    let credentials = rusoto_core::credential::StaticProvider::new_minimal(access_key_id, secret_access_key);
+    let credentials =
+        rusoto_core::credential::StaticProvider::new_minimal(access_key_id, secret_access_key);
     let region = rusoto_core::Region::Custom {
         name: "auto".to_owned(),
         endpoint: r2_endpoint,
@@ -888,6 +902,68 @@ async fn merge_json(dir: &str, s3_obj: &[Object]) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn generate_sitemap(dir: &str, site_url: &str) -> anyhow::Result<()> {
+    let dir = Path::new(dir);
+    let site_url = site_url.trim_end_matches('/');
+    let metadata_git_dir = get_git_root(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let metadata_scope = get_git_scope_path(&metadata_git_dir, dir);
+    let metadata_lastmods = get_git_lastmods_for_yaml(&metadata_git_dir, &metadata_scope)?;
+    let homepage_lastmod = get_latest_git_commit_time(&metadata_git_dir, Some(&metadata_scope))?;
+    let about_lastmod = homepage_lastmod.clone();
+
+    let mut md5_entries = Vec::new();
+    for metadata in dir.read_dir()? {
+        let metadata = metadata?;
+        let path = metadata.path();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yml") {
+            let md5 = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| anyhow::anyhow!("Invalid metadata filename: {:?}", path))?;
+            let file_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| anyhow::anyhow!("Invalid metadata filename: {:?}", path))?;
+            let rel_path = path
+                .strip_prefix(&metadata_git_dir)
+                .unwrap_or(path.as_path())
+                .to_string_lossy()
+                .replace('\\', "/");
+            let lastmod = metadata_lastmods
+                .get(&rel_path)
+                .cloned()
+                .or_else(|| metadata_lastmods.get(file_name).cloned())
+                .ok_or_else(|| anyhow::anyhow!("Missing git lastmod for {:?}", path))?;
+            md5_entries.push((md5.to_string(), lastmod));
+        }
+    }
+    md5_entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    let mut sitemap = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+"#,
+    );
+    sitemap.push_str(&render_sitemap_url(site_url, &homepage_lastmod));
+    sitemap.push_str(&render_sitemap_url(
+        &format!("{site_url}/about"),
+        &about_lastmod,
+    ));
+    for (md5, lastmod) in md5_entries {
+        sitemap.push_str(&render_sitemap_url(
+            &format!("{site_url}/?q={md5}"),
+            &lastmod,
+        ));
+    }
+    sitemap.push_str("</urlset>\n");
+
+    let sitemap_path = dir.join("sitemap.xml");
+    let mut sitemap_file = File::create(&sitemap_path).await?;
+    sitemap_file.write_all(sitemap.as_bytes()).await?;
+    println!("Sitemap XML written to: {:?}", sitemap_path);
+    Ok(())
+}
+
 fn get_file_size(id: &str, s3_obj: &[Object]) -> Option<i64> {
     s3_obj
         .iter()
@@ -918,8 +994,119 @@ async fn upload_metadata(
         ..Default::default()
     };
     r2_client.put_object(request).await?;
+    let sitemap_xml = File::open(Path::new(&dir).join("sitemap.xml")).await?;
+    let mut reader = BufReader::new(sitemap_xml);
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).await?;
+    let request = rusoto_s3::PutObjectRequest {
+        bucket,
+        key: "sitemap.xml".to_string(),
+        body: Some(buf.into()),
+        content_type: Some("application/xml".to_string()),
+        ..Default::default()
+    };
+    r2_client.put_object(request).await?;
     println!("Metadata uploaded");
     Ok(())
+}
+
+fn render_sitemap_url(loc: &str, lastmod: &str) -> String {
+    format!("  <url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>\n")
+}
+
+fn get_git_root(path: &Path) -> anyhow::Result<PathBuf> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to resolve git root for {:?}: {}",
+            path,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(PathBuf::from(String::from_utf8(output.stdout)?.trim()))
+}
+
+fn get_git_scope_path(repo_root: &Path, target: &Path) -> PathBuf {
+    let scope = target.strip_prefix(repo_root).unwrap_or(target);
+    if scope.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        scope.to_path_buf()
+    }
+}
+
+fn get_latest_git_commit_time(repo_root: &Path, scope: Option<&Path>) -> anyhow::Result<String> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(["log", "-1", "--format=%cI"]);
+    if let Some(scope) = scope {
+        command.arg("--").arg(scope);
+    }
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to read latest git commit time for {:?}: {}",
+            repo_root,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
+fn get_git_lastmods_for_yaml(
+    repo_root: &Path,
+    scope: &Path,
+) -> anyhow::Result<HashMap<String, String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["log", "--name-only", "--format=__COMMIT__%n%cI", "--"])
+        .arg(scope)
+        .output()?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to read git history for {:?}: {}",
+            repo_root,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    let mut lastmods = HashMap::new();
+    let mut current_commit_time: Option<String> = None;
+    let mut expect_commit_time = false;
+
+    for line in stdout.lines() {
+        if line == "__COMMIT__" {
+            expect_commit_time = true;
+            current_commit_time = None;
+            continue;
+        }
+        if expect_commit_time {
+            current_commit_time = Some(line.to_string());
+            expect_commit_time = false;
+            continue;
+        }
+        if line.is_empty() {
+            continue;
+        }
+        if !line.ends_with(".yml") {
+            continue;
+        }
+        if let Some(commit_time) = &current_commit_time {
+            lastmods
+                .entry(line.replace('\\', "/"))
+                .or_insert_with(|| commit_time.clone());
+        }
+    }
+
+    Ok(lastmods)
 }
 
 async fn list_all_objects(client: &rusoto_s3::S3Client, bucket: &str) -> Vec<Object> {
