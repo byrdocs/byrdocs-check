@@ -1,3 +1,4 @@
+use chrono::{DateTime, FixedOffset, NaiveDate};
 use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
 use rusoto_core::HttpClient;
 use rusoto_s3::{Object, S3, S3Client};
@@ -16,7 +17,14 @@ use tokio::{
 use webp::Encoder;
 use zip::{HasZipMetadata, ZipArchive};
 
-use byrdocs_check::{get_env, metadata::*};
+use byrdocs_check::{get_env, get_optional_env, metadata::*};
+
+const SITEMAP_MIN_LASTMOD_ENV: &str = "SITEMAP_MIN_LASTMOD";
+
+struct SitemapMinLastmod {
+    raw: String,
+    parsed: DateTime<FixedOffset>,
+}
 
 #[derive(serde::Deserialize, Debug)]
 #[allow(dead_code)]
@@ -923,7 +931,11 @@ async fn generate_sitemap(dir: &str, site_url: &str) -> anyhow::Result<()> {
     let metadata_git_dir = get_git_root(dir).unwrap_or_else(|_| dir.to_path_buf());
     let metadata_scope = get_git_scope_path(&metadata_git_dir, dir);
     let metadata_lastmods = get_git_lastmods_for_yaml(&metadata_git_dir, &metadata_scope)?;
-    let homepage_lastmod = get_latest_git_commit_time(&metadata_git_dir, Some(&metadata_scope))?;
+    let sitemap_min_lastmod = get_sitemap_min_lastmod()?;
+    let homepage_lastmod = clamp_sitemap_lastmod(
+        &get_latest_git_commit_time(&metadata_git_dir, Some(&metadata_scope))?,
+        sitemap_min_lastmod.as_ref(),
+    )?;
     let about_lastmod = homepage_lastmod.clone();
 
     let mut md5_entries = Vec::new();
@@ -949,6 +961,7 @@ async fn generate_sitemap(dir: &str, site_url: &str) -> anyhow::Result<()> {
                 .cloned()
                 .or_else(|| metadata_lastmods.get(file_name).cloned())
                 .ok_or_else(|| anyhow::anyhow!("Missing git lastmod for {:?}", path))?;
+            let lastmod = clamp_sitemap_lastmod(&lastmod, sitemap_min_lastmod.as_ref())?;
             md5_entries.push((md5.to_string(), lastmod));
         }
     }
@@ -1027,6 +1040,48 @@ async fn upload_metadata(
 
 fn render_sitemap_url(loc: &str, lastmod: &str) -> String {
     format!("  <url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>\n")
+}
+
+fn get_sitemap_min_lastmod() -> anyhow::Result<Option<SitemapMinLastmod>> {
+    get_optional_env(SITEMAP_MIN_LASTMOD_ENV)
+        .map(SitemapMinLastmod::parse)
+        .transpose()
+}
+
+fn clamp_sitemap_lastmod(
+    lastmod: &str,
+    min_lastmod: Option<&SitemapMinLastmod>,
+) -> anyhow::Result<String> {
+    if let Some(min_lastmod) = min_lastmod {
+        let parsed_lastmod = parse_sitemap_lastmod(lastmod)?;
+        if parsed_lastmod < min_lastmod.parsed {
+            return Ok(min_lastmod.raw.clone());
+        }
+    }
+    Ok(lastmod.to_string())
+}
+
+fn parse_sitemap_lastmod(value: &str) -> anyhow::Result<DateTime<FixedOffset>> {
+    if let Ok(date_time) = DateTime::parse_from_rfc3339(value) {
+        return Ok(date_time);
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        return Ok(date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight should be valid")
+            .and_utc()
+            .fixed_offset());
+    }
+    Err(anyhow::anyhow!(
+        "Invalid {SITEMAP_MIN_LASTMOD_ENV} or sitemap lastmod value: {value}. Expected YYYY-MM-DD or RFC3339.",
+    ))
+}
+
+impl SitemapMinLastmod {
+    fn parse(raw: String) -> anyhow::Result<Self> {
+        let parsed = parse_sitemap_lastmod(&raw)?;
+        Ok(Self { raw, parsed })
+    }
 }
 
 fn get_git_root(path: &Path) -> anyhow::Result<PathBuf> {
@@ -1124,6 +1179,32 @@ fn get_git_lastmods_for_yaml(
     Ok(lastmods)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_sitemap_lastmod_replaces_older_dates() {
+        let min_lastmod = SitemapMinLastmod::parse("2024-01-01".to_string()).unwrap();
+
+        let clamped =
+            clamp_sitemap_lastmod("2023-12-31T23:59:59+00:00", Some(&min_lastmod)).unwrap();
+
+        assert_eq!(clamped, "2024-01-01");
+    }
+
+    #[test]
+    fn clamp_sitemap_lastmod_keeps_newer_dates() {
+        let min_lastmod =
+            SitemapMinLastmod::parse("2024-01-01T08:00:00+08:00".to_string()).unwrap();
+
+        let clamped =
+            clamp_sitemap_lastmod("2024-01-02T00:00:00+00:00", Some(&min_lastmod)).unwrap();
+
+        assert_eq!(clamped, "2024-01-02T00:00:00+00:00");
+    }
+}
+
 async fn list_all_objects(client: &rusoto_s3::S3Client, bucket: &str) -> Vec<Object> {
     let mut continuation_token: Option<String> = None;
     let mut s3_file_list = Vec::new();
@@ -1167,6 +1248,7 @@ mod test {
     use crate::generate_zip_preview;
 
     #[tokio::test]
+    #[ignore]
     async fn test_zip_preview() {
         println!("Current directory: {:?}", std::env::current_dir().unwrap());
         generate_zip_preview("https://filelist.byrdocs.org/png", HashSet::new())

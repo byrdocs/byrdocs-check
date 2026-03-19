@@ -6,7 +6,7 @@ use tokio::{
     io::{AsyncReadExt, BufReader},
 };
 
-use byrdocs_check::{get_env,metadata::*};
+use byrdocs_check::{get_env, metadata::*};
 
 struct Input {
     metadata_dir: String,
@@ -227,7 +227,7 @@ async fn check(
     api_result: &ApiResult,
     r2_file_bucket: &str,
     s3_client: &rusoto_s3::S3Client,
-    byrdocs_site_url:&str,
+    byrdocs_site_url: &str,
 ) -> anyhow::Result<()> {
     let mut errors = Vec::new();
 
@@ -240,11 +240,11 @@ async fn check(
         errors.push(e);
     }
 
-    let url_regex =
-        regex::Regex::new(&format!(
-            r"^{}/files/[a-fA-F0-9]{{32}}\.(pdf|zip)$",
-            regex::escape(&byrdocs_site_url),
-        )).unwrap();
+    let url_regex = regex::Regex::new(&format!(
+        r"^{}/files/[a-fA-F0-9]{{32}}\.(pdf|zip)$",
+        regex::escape(&byrdocs_site_url),
+    ))
+    .unwrap();
 
     if !s3_file_list.contains(&metadata.url[metadata.url.len() - 36..].to_string()) {
         errors.push(anyhow::anyhow!("请检查文件是否上传"));
