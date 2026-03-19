@@ -20,10 +20,30 @@ use zip::{HasZipMetadata, ZipArchive};
 use byrdocs_check::{get_env, get_optional_env, metadata::*};
 
 const SITEMAP_MIN_LASTMOD_ENV: &str = "SITEMAP_MIN_LASTMOD";
+const GITHUB_API_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+const BYRDOCS_SITE_REPO_OWNER_ENV: &str = "BYRDOCS_SITE_REPO_OWNER";
+const BYRDOCS_SITE_REPO_NAME_ENV: &str = "BYRDOCS_SITE_REPO_NAME";
+const DEFAULT_BYRDOCS_SITE_REPO_OWNER: &str = "byrdocs";
+const DEFAULT_BYRDOCS_SITE_REPO_NAME: &str = "byrdocs";
 
 struct SitemapMinLastmod {
     raw: String,
     parsed: DateTime<FixedOffset>,
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubCommitListItem {
+    commit: GitHubCommit,
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubCommit {
+    committer: GitHubCommitAuthor,
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubCommitAuthor {
+    date: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -933,7 +953,7 @@ async fn generate_sitemap(dir: &str, site_url: &str) -> anyhow::Result<()> {
     let metadata_lastmods = get_git_lastmods_for_yaml(&metadata_git_dir, &metadata_scope)?;
     let sitemap_min_lastmod = get_sitemap_min_lastmod()?;
     let homepage_lastmod = clamp_sitemap_lastmod(
-        &get_latest_git_commit_time(&metadata_git_dir, Some(&metadata_scope))?,
+        &get_latest_byrdocs_site_commit_time().await?,
         sitemap_min_lastmod.as_ref(),
     )?;
     let about_lastmod = homepage_lastmod.clone();
@@ -1084,6 +1104,34 @@ impl SitemapMinLastmod {
     }
 }
 
+async fn get_latest_byrdocs_site_commit_time() -> anyhow::Result<String> {
+    let repo_owner = get_optional_env(BYRDOCS_SITE_REPO_OWNER_ENV)
+        .unwrap_or_else(|| DEFAULT_BYRDOCS_SITE_REPO_OWNER.to_string());
+    let repo_name = get_optional_env(BYRDOCS_SITE_REPO_NAME_ENV)
+        .unwrap_or_else(|| DEFAULT_BYRDOCS_SITE_REPO_NAME.to_string());
+    let commits = reqwest::Client::new()
+        .get(format!(
+            "https://api.github.com/repos/{repo_owner}/{repo_name}/commits"
+        ))
+        .query(&[("per_page", "1")])
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", GITHUB_API_USER_AGENT)
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<Vec<GitHubCommitListItem>>()
+        .await?;
+
+    commits
+        .into_iter()
+        .next()
+        .map(|commit| commit.commit.committer.date)
+        .ok_or_else(|| {
+            anyhow::anyhow!("No commits returned from github.com/{repo_owner}/{repo_name}")
+        })
+}
+
 fn get_git_root(path: &Path) -> anyhow::Result<PathBuf> {
     let output = Command::new("git")
         .arg("-C")
@@ -1107,26 +1155,6 @@ fn get_git_scope_path(repo_root: &Path, target: &Path) -> PathBuf {
     } else {
         scope.to_path_buf()
     }
-}
-
-fn get_latest_git_commit_time(repo_root: &Path, scope: Option<&Path>) -> anyhow::Result<String> {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(["log", "-1", "--format=%cI"]);
-    if let Some(scope) = scope {
-        command.arg("--").arg(scope);
-    }
-    let output = command.output()?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "Failed to read latest git commit time for {:?}: {}",
-            repo_root,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
 fn get_git_lastmods_for_yaml(
@@ -1202,6 +1230,28 @@ mod tests {
             clamp_sitemap_lastmod("2024-01-02T00:00:00+00:00", Some(&min_lastmod)).unwrap();
 
         assert_eq!(clamped, "2024-01-02T00:00:00+00:00");
+    }
+
+    #[test]
+    fn clamp_sitemap_lastmod_handles_timezones() {
+        let min_lastmod =
+            SitemapMinLastmod::parse("2024-01-01T16:00:01+08:00".to_string()).unwrap();
+
+        let clamped =
+            clamp_sitemap_lastmod("2024-01-01T08:00:00+00:00", Some(&min_lastmod)).unwrap();
+
+        assert_eq!(clamped, "2024-01-01T16:00:01+08:00");
+    }
+
+    #[test]
+    fn clamp_sitemap_lastmod_handles_timezones2() {
+        let min_lastmod =
+            SitemapMinLastmod::parse("2026-03-19T16:25:00+08:00".to_string()).unwrap();
+
+        let clamped =
+            clamp_sitemap_lastmod("2026-03-19T16:32:04+08:00", Some(&min_lastmod)).unwrap();
+
+        assert_eq!(clamped, "2026-03-19T16:32:04+08:00");
     }
 }
 

@@ -23,3 +23,6 @@ check-cmt: Check the comments in the specified directory.(Upload cover and metad
 `upload-metadata` supports an optional environment variable `SITEMAP_MIN_LASTMOD`.
 When set, any sitemap `lastmod` earlier than this value will be replaced by it.
 Supported formats: `YYYY-MM-DD` or RFC3339, for example `2024-01-01` or `2024-01-01T00:00:00+08:00`.
+
+Homepage and `/about` sitemap `lastmod` are fetched from GitHub.
+You can override the target repository with `BYRDOCS_SITE_REPO_OWNER` and `BYRDOCS_SITE_REPO_NAME`; both default to `byrdocs`.
