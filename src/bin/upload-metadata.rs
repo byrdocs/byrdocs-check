@@ -17,7 +17,7 @@ use tokio::{
 use webp::Encoder;
 use zip::{HasZipMetadata, ZipArchive};
 
-use byrdocs_check::{get_env, get_optional_env, metadata::*};
+use byrdocs_check::{get_env, get_env_or, get_optional_env, metadata::*};
 
 const SITEMAP_MIN_LASTMOD_ENV: &str = "SITEMAP_MIN_LASTMOD";
 const GITHUB_API_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
@@ -95,6 +95,7 @@ struct Input {
     backup_access_key_id: String,
     backup_secret_access_key: String,
     backup_file_bucket: String,
+    backup_endpoint_region: String,
 }
 
 impl Input {
@@ -116,6 +117,7 @@ impl Input {
             backup_access_key_id: get_env("BACKUP_ACCESS_KEY_ID"),
             backup_secret_access_key: get_env("BACKUP_SECRET_ACCESS_KEY"),
             backup_file_bucket: get_env("BACKUP_FILE_BUCKET"),
+            backup_endpoint_region: get_env_or("BACKUP_ENDPOINT_REGION","auto".to_string()),
         }
     }
 }
@@ -149,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
 
     let s3_client = get_s3_client(
         input.r2_endpoint.clone(),
+        "auto".to_owned(),
         input.r2_access_key_id.clone(),
         input.r2_secret_access_key.clone(),
     )
@@ -156,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
     let s3_obj = list_all_objects(&s3_client, &input.r2_file_bucket).await;
     let backup_client = get_s3_client(
         input.backup_endpoint.clone(),
+        input.backup_endpoint_region.clone(),
         input.backup_access_key_id.clone(),
         input.backup_secret_access_key.clone(),
     )
@@ -221,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn get_s3_client(
     r2_endpoint: String,
+    r2_endpoint_region: String,
     access_key_id: String,
     secret_access_key: String,
 ) -> anyhow::Result<S3Client> {
@@ -228,7 +233,7 @@ async fn get_s3_client(
     let credentials =
         rusoto_core::credential::StaticProvider::new_minimal(access_key_id, secret_access_key);
     let region = rusoto_core::Region::Custom {
-        name: "auto".to_owned(),
+        name: r2_endpoint_region,
         endpoint: r2_endpoint,
     };
     let s3_client = rusoto_s3::S3Client::new_with(http_client, credentials, region);
@@ -952,10 +957,10 @@ async fn generate_sitemap(dir: &str, site_url: &str) -> anyhow::Result<()> {
     let metadata_scope = get_git_scope_path(&metadata_git_dir, dir);
     let metadata_lastmods = get_git_lastmods_for_yaml(&metadata_git_dir, &metadata_scope)?;
     let sitemap_min_lastmod = get_sitemap_min_lastmod()?;
-    let homepage_lastmod = clamp_sitemap_lastmod(
-        &get_latest_byrdocs_site_commit_time().await?,
+    let homepage_lastmod = dbg!(clamp_sitemap_lastmod(
+        &dbg!(get_latest_byrdocs_site_commit_time().await?),
         sitemap_min_lastmod.as_ref(),
-    )?;
+    )?);
     let about_lastmod = homepage_lastmod.clone();
 
     let mut md5_entries = Vec::new();
@@ -1029,7 +1034,7 @@ async fn upload_metadata(
     dir: &String,
 ) -> anyhow::Result<()> {
     println!("Uploading metadata to R2");
-    let r2_client = get_s3_client(r2_url, r2_access_key_id, r2_secret_access_key).await?;
+    let r2_client = get_s3_client(r2_url, "auto".to_owned(), r2_access_key_id, r2_secret_access_key).await?;
     let metadata_json = File::open(Path::new(&dir).join("metadata.json")).await?;
     let mut reader = BufReader::new(metadata_json);
     let mut buf = Vec::new();
