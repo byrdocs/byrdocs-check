@@ -326,21 +326,21 @@ fn check_book(book: &Book, md5: &str) -> anyhow::Result<()> {
             errors.push(anyhow::anyhow!("请检查出版年份"));
         }
     }
-    book.isbn.iter().for_each(|isbn| {
-        if let Err(e) = isbn.parse::<isbn::Isbn13>() {
-            errors.push(anyhow::anyhow!("请检查isbn格式: {}", e));
+    book.isbn.iter().for_each(|isbn|
+        match isbn.parse::<isbn::Isbn13>() {
+            Ok(isbn) => {
+                let mut isbns_lock = ISBNS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
+                if let Some((_, existing_md5)) = isbns_lock.iter().find(|(i, _)| i == &isbn) {
+                    errors.push(anyhow::anyhow!("重复的isbn. md5: {} {}", md5, existing_md5));
+                } else {
+                    isbns_lock.push((isbn, md5.to_string()));
+                }
+            }
+            Err(e) => {
+                errors.push(anyhow::anyhow!("请检查isbn格式：{}", e));
+            }
         }
-    });
-    for isbn in book.isbn.clone() {
-        let isbn = isbn.parse::<isbn::Isbn13>().unwrap();
-
-        let mut isbns_lock = ISBNS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
-        if let Some((_, existing_md5)) = isbns_lock.iter().find(|(i, _)| i == &isbn) {
-            errors.push(anyhow::anyhow!("重复的isbn. md5: {} {}", md5, existing_md5));
-        } else {
-            isbns_lock.push((isbn, md5.to_string()));
-        }
-    }
+    );
     if book.filetype != "pdf" {
         errors.push(anyhow::anyhow!("请检查filetype，只能为pdf"));
     }
