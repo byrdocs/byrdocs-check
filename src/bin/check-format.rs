@@ -326,8 +326,9 @@ fn check_book(book: &Book, md5: &str) -> anyhow::Result<()> {
             errors.push(anyhow::anyhow!("请检查出版年份"));
         }
     }
-    book.isbn.iter().for_each(|isbn|
-        match isbn.parse::<isbn::Isbn13>() {
+    book.isbn
+        .iter()
+        .for_each(|isbn| match isbn.parse::<isbn::Isbn13>() {
             Ok(isbn) => {
                 let mut isbns_lock = ISBNS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
                 if let Some((_, existing_md5)) = isbns_lock.iter().find(|(i, _)| i == &isbn) {
@@ -339,8 +340,7 @@ fn check_book(book: &Book, md5: &str) -> anyhow::Result<()> {
             Err(e) => {
                 errors.push(anyhow::anyhow!("请检查isbn格式：{}", e));
             }
-        }
-    );
+        });
     if book.filetype != "pdf" {
         errors.push(anyhow::anyhow!("请检查filetype，只能为pdf"));
     }
@@ -394,8 +394,8 @@ fn check_test(test: &Test) -> anyhow::Result<()> {
     } else {
         errors.push(anyhow::anyhow!("时间格式不正确"));
     }
-    if test.filetype != "pdf" && test.filetype != "zip" {
-        errors.push(anyhow::anyhow!("请检查filetype，只能为pdf或zip"));
+    if !["pdf", "zip", "bump"].contains(&test.filetype.as_str()) {
+        errors.push(anyhow::anyhow!("请检查filetype，只能为pdf、zip或bump"));
     }
     if test.content.len() == 0 {
         errors.push(anyhow::anyhow!("content不能为空"));
@@ -450,6 +450,31 @@ fn check_doc(doc: &Doc) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod test {
+    // Long-lived metadata contract: BUMP papers use the ordinary exam validation.
+    #[test]
+    fn bump_uses_pdf_exam_metadata() {
+        let mut paper: super::Test = serde_yaml::from_str(
+            r#"
+course:
+  name: 数学分析（上）
+time:
+  start: '2025'
+  end: '2026'
+  semester: First
+  stage: 期中
+filetype: bump
+content: [原题, 答案]
+"#,
+        )
+        .unwrap();
+        for filetype in ["pdf", "bump"] {
+            paper.filetype = filetype.to_string();
+            assert!(super::check_test(&paper).is_ok());
+        }
+        paper.content = vec!["课件".to_string()];
+        assert!(super::check_test(&paper).is_err());
+    }
+
     #[test]
     fn test_isbn() {
         let isbn = "978-7-111-40772-1";

@@ -117,7 +117,7 @@ impl Input {
             backup_access_key_id: get_env("BACKUP_ACCESS_KEY_ID"),
             backup_secret_access_key: get_env("BACKUP_SECRET_ACCESS_KEY"),
             backup_file_bucket: get_env("BACKUP_FILE_BUCKET"),
-            backup_endpoint_region: get_env_or("BACKUP_ENDPOINT_REGION","auto".to_string()),
+            backup_endpoint_region: get_env_or("BACKUP_ENDPOINT_REGION", "auto".to_string()),
         }
     }
 }
@@ -1034,7 +1034,13 @@ async fn upload_metadata(
     dir: &String,
 ) -> anyhow::Result<()> {
     println!("Uploading metadata to R2");
-    let r2_client = get_s3_client(r2_url, "auto".to_owned(), r2_access_key_id, r2_secret_access_key).await?;
+    let r2_client = get_s3_client(
+        r2_url,
+        "auto".to_owned(),
+        r2_access_key_id,
+        r2_secret_access_key,
+    )
+    .await?;
     let metadata_json = File::open(Path::new(&dir).join("metadata.json")).await?;
     let mut reader = BufReader::new(metadata_json);
     let mut buf = Vec::new();
@@ -1215,6 +1221,46 @@ fn get_git_lastmods_for_yaml(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Long-lived publication contract: BUMP keeps its source type and PDF object size.
+    #[tokio::test]
+    async fn merge_bump_metadata_uses_pdf_object() {
+        let dir = std::env::temp_dir().join(format!(
+            "byrdocs-bump-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let source = json!({
+            "id": id,
+            "url": format!("https://byrdocs.org/files/{id}.pdf"),
+            "type": "test",
+            "data": {
+                "course": {"name": "数学分析（上）"},
+                "time": {"start": "2025", "end": "2026"},
+                "filetype": "bump",
+                "content": ["原题", "答案"]
+            }
+        });
+        std::fs::write(dir.join(format!("{id}.yml")), source.to_string()).unwrap();
+        let objects = [Object {
+            key: Some(format!("{id}.pdf")),
+            size: Some(12345),
+            ..Default::default()
+        }];
+        merge_json(dir.to_str().unwrap(), &objects).await.unwrap();
+        let output: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("metadata.json")).unwrap()).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(output[0]["id"], source["id"]);
+        assert_eq!(output[0]["url"], source["url"]);
+        assert_eq!(output[0]["data"]["filetype"], "bump");
+        assert_eq!(output[0]["data"]["filesize"], 12345);
+    }
 
     #[test]
     fn clamp_sitemap_lastmod_replaces_older_dates() {
