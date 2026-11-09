@@ -1222,9 +1222,8 @@ fn get_git_lastmods_for_yaml(
 mod tests {
     use super::*;
 
-    // Long-lived publication contract: BUMP keeps its source type and PDF object size.
     #[tokio::test]
-    async fn merge_bump_metadata_uses_pdf_object() {
+    async fn merge_pdf_metadata_preserves_external_source() {
         let dir = std::env::temp_dir().join(format!(
             "byrdocs-bump-{}-{}",
             std::process::id(),
@@ -1235,31 +1234,44 @@ mod tests {
         ));
         std::fs::create_dir(&dir).unwrap();
         let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let source = json!({
+        let mut source = json!({
             "id": id,
             "url": format!("https://byrdocs.org/files/{id}.pdf"),
             "type": "test",
             "data": {
                 "course": {"name": "数学分析（上）"},
                 "time": {"start": "2025", "end": "2026"},
-                "filetype": "bump",
+                "filetype": "pdf",
+                "external_source": "bump",
                 "content": ["原题", "答案"]
             }
         });
-        std::fs::write(dir.join(format!("{id}.yml")), source.to_string()).unwrap();
         let objects = [Object {
             key: Some(format!("{id}.pdf")),
             size: Some(12345),
             ..Default::default()
         }];
-        merge_json(dir.to_str().unwrap(), &objects).await.unwrap();
-        let output: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(dir.join("metadata.json")).unwrap()).unwrap();
+        for external_source in [Some("bump"), None] {
+            if external_source.is_none() {
+                source["data"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("external_source");
+            }
+            std::fs::write(dir.join(format!("{id}.yml")), source.to_string()).unwrap();
+            merge_json(dir.to_str().unwrap(), &objects).await.unwrap();
+            let output: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(dir.join("metadata.json")).unwrap()).unwrap();
+            assert_eq!(output[0]["id"], source["id"]);
+            assert_eq!(output[0]["url"], source["url"]);
+            assert_eq!(output[0]["data"]["filetype"], "pdf");
+            assert_eq!(
+                output[0]["data"].get("external_source"),
+                source["data"].get("external_source")
+            );
+            assert_eq!(output[0]["data"]["filesize"], 12345);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(output[0]["id"], source["id"]);
-        assert_eq!(output[0]["url"], source["url"]);
-        assert_eq!(output[0]["data"]["filetype"], "bump");
-        assert_eq!(output[0]["data"]["filesize"], 12345);
     }
 
     #[test]

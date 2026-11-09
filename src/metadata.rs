@@ -38,6 +38,8 @@ pub struct Test {
     pub course: Course,
     pub time: Time,
     pub filetype: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_source: Option<String>,
     pub content: Vec<String>,
     #[serde(skip_deserializing)]
     pub filesize: Option<i64>,

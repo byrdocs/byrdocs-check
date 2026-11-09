@@ -394,8 +394,16 @@ fn check_test(test: &Test) -> anyhow::Result<()> {
     } else {
         errors.push(anyhow::anyhow!("时间格式不正确"));
     }
-    if !["pdf", "zip", "bump"].contains(&test.filetype.as_str()) {
-        errors.push(anyhow::anyhow!("请检查filetype，只能为pdf、zip或bump"));
+    if !["pdf", "zip"].contains(&test.filetype.as_str()) {
+        errors.push(anyhow::anyhow!("请检查filetype，只能为pdf或zip"));
+    }
+    if let Some(source) = &test.external_source {
+        if source != "bump" {
+            errors.push(anyhow::anyhow!("请检查external_source，只能为bump"));
+        }
+        if test.filetype != "pdf" {
+            errors.push(anyhow::anyhow!("external_source仅用于pdf试卷"));
+        }
     }
     if test.content.len() == 0 {
         errors.push(anyhow::anyhow!("content不能为空"));
@@ -450,9 +458,8 @@ fn check_doc(doc: &Doc) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod test {
-    // Long-lived metadata contract: BUMP papers use the ordinary exam validation.
     #[test]
-    fn bump_uses_pdf_exam_metadata() {
+    fn external_source_requires_pdf_exam_metadata() {
         let mut paper: super::Test = serde_yaml::from_str(
             r#"
 course:
@@ -462,15 +469,30 @@ time:
   end: '2026'
   semester: First
   stage: 期中
-filetype: bump
+filetype: pdf
+external_source: bump
 content: [原题, 答案]
 "#,
         )
         .unwrap();
-        for filetype in ["pdf", "bump"] {
+        for (filetype, source, valid) in [
+            ("pdf", Some("bump"), true),
+            ("pdf", None, true),
+            ("zip", None, true),
+            ("bump", None, false),
+            ("zip", Some("bump"), false),
+            ("pdf", Some("other"), false),
+        ] {
             paper.filetype = filetype.to_string();
-            assert!(super::check_test(&paper).is_ok());
+            paper.external_source = source.map(str::to_owned);
+            assert_eq!(
+                super::check_test(&paper).is_ok(),
+                valid,
+                "filetype={filetype}, external_source={source:?}"
+            );
         }
+        paper.filetype = "pdf".to_owned();
+        paper.external_source = Some("bump".to_owned());
         paper.content = vec!["课件".to_string()];
         assert!(super::check_test(&paper).is_err());
     }
