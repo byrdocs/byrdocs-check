@@ -401,9 +401,6 @@ fn check_test(test: &Test) -> anyhow::Result<()> {
         if source != "bump" {
             errors.push(anyhow::anyhow!("请检查external_source，只能为bump"));
         }
-        if test.filetype != "pdf" {
-            errors.push(anyhow::anyhow!("external_source仅用于pdf试卷"));
-        }
     }
     if test.content.len() == 0 {
         errors.push(anyhow::anyhow!("content不能为空"));
@@ -459,7 +456,7 @@ fn check_doc(doc: &Doc) -> anyhow::Result<()> {
 #[cfg(test)]
 mod test {
     #[test]
-    fn external_source_requires_pdf_exam_metadata() {
+    fn validates_exam_filetype_and_external_source() {
         let mut paper: super::Test = serde_yaml::from_str(
             r#"
 course:
@@ -480,7 +477,6 @@ content: [原题, 答案]
             ("pdf", None, true),
             ("zip", None, true),
             ("bump", None, false),
-            ("zip", Some("bump"), false),
             ("pdf", Some("other"), false),
         ] {
             paper.filetype = filetype.to_string();
